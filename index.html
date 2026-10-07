@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#101312">
+  <meta name="description" content="Dein Kraftdreikampf-Plan und Trainingslog.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <title>MANAGE MY GAIN</title>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#">MMG<span> / POWERLIFTING</span></a>
+    <div class="topbar-user"><div id="userBadge" class="user-badge hidden"></div><button id="logout" class="button ghost hidden">Abmelden</button></div>
+  </header>
+  <main id="app" class="shell">
+    <section id="authView" class="auth-view">
+      <div class="eyebrow">KRAFTDREIKAMPF · TRAINING LOG</div><h1>Jede Einheit<br><em>zählt.</em></h1>
+      <p class="muted">Erstelle deinen Plan. Tracke jede Wiederholung.</p>
+      <div class="auth-card"><h2>Dein Trainingsbereich</h2><p class="muted">Melde dich mit deinem Google-Konto an.</p>
+        <button id="googleSignIn" class="button primary full">Mit Google anmelden <span>↗</span></button>
+        <p id="authMessage" class="message"></p><p class="micro">Trainingspläne werden privat deinem Google-Konto zugeordnet.</p>
+      </div>
+    </section>
+
+    <section id="dashboard" class="hidden">
+      <div class="welcome"><div><div class="eyebrow">DEIN TRAININGSBEREICH</div><h1 id="hello">Bereit?</h1></div></div>
+      <div class="dashboard-grid">
+        <section class="panel plan-panel">
+          <div class="panel-head"><div><div class="eyebrow">DEIN PROGRAMM</div><h2>Meine Pläne</h2></div><div class="plan-actions"><button id="managePlans" class="button ghost">Verwalten</button><button id="newPlan" class="button primary">＋ Plan erstellen</button></div></div>
+          <div id="planList" class="plan-list"></div>
+          <div id="activePlanSection" class="active-plan-section hidden">
+            <div class="panel-subhead"><div><div class="eyebrow">AKTIVER PLAN</div><h3 id="activePlanTitle"></h3><p id="activePlanMeta" class="muted"></p></div></div>
+            <section class="next-session-section"><div class="eyebrow">ALS NÄCHSTES</div><div id="nextSessionCard"></div></section>
+            <section class="progress-overview"><div class="eyebrow">GEHOBENE GEWICHTE & PROGRESSION</div><p class="micro">Planwerte blau, erreichte Gewichte grün. Abweichungen werden getrennt angezeigt.</p><div id="progressGraphs" class="progress-graphs"></div></section>
+          </div>
+        </section>
+        <section class="panel history-panel"><div class="eyebrow">TRAININGSLOG</div><h2>Zuletzt trainiert</h2><div id="historyList" class="history-list"></div></section>
+      </div>
+    </section>
+
+    <section id="planManagerView" class="panel hidden">
+      <button class="back button ghost" data-back="dashboard">← Übersicht</button>
+      <div class="eyebrow">PLANVERWALTUNG</div><h1>Pläne.</h1>
+      <p class="muted">Wähle einen Plan zum Bearbeiten aus.</p>
+      <div id="planManagerList" class="plan-manager-list"></div>
+    </section>
+
+    <section id="planView" class="panel hidden">
+      <button class="back button ghost" data-back="dashboard">← Übersicht</button>
+      <div class="eyebrow">PROGRAMM EINRICHTEN</div><h1>Dein Plan.</h1>
+      <p class="muted">Erstelle einen achtwöchigen Trainingsblock mit vier bis fünf Übungen je Einheit. Die Startgewichte werden aus deinen 3×3-Werten geschätzt.</p>
+      <form id="planForm">
+        <label>Planname<input name="planName" maxlength="60" placeholder="z. B. Herbstaufbau 2026" required></label>
+        <label>Trainingstage pro Woche<select name="frequency"><option value="2">2 Tage</option><option value="3">3 Tage</option><option value="4" selected>4 Tage</option><option value="5">5 Tage</option></select></label>
+        <label>Trainingsstand<select name="level"><option value="beginner">Einsteiger</option><option value="intermediate" selected>Fortgeschritten</option><option value="advanced">Erfahren</option></select></label>
+        <label>Einheiten starten am<select name="startDay"><option value="1">Montag</option><option value="2">Dienstag</option><option value="3">Mittwoch</option><option value="4">Donnerstag</option><option value="5">Freitag</option><option value="6">Samstag</option><option value="0">Sonntag</option></select></label>
+        <label>Womit möchtest du starten?<select name="focus"><option value="squat">Squat · Kniebeuge</option><option value="bench">Bench · Bankdrücken</option><option value="deadlift">Deadlift · Kreuzheben</option></select></label>
+        <label>Trainingsphase<select name="phase"><option value="hypertrophy">Hypertrophie</option><option value="strength">Kraft</option></select></label>
+        <p id="templatePreview" class="micro">Vorlage: 4 Tage · Squat-Spezialisierung · Hypertrophie · Fortgeschritten. 8 Wochen, meist 4–5 Übungen je Einheit; Erfahrungslevel steuert Volumen und Ziel-RPE.</p>
+        <p class="micro">Woche 4 und 8 reduzieren Sätze und Last als Deload. Diese Vorlage ist ein allgemeiner Trainingsblock, keine Wettkampf-Taperplanung.</p>
+        <div class="eyebrow max-heading">DEIN 3×3 · ARBEITSGEWICHT PRO SATZ · KG</div>
+        <p class="micro">Trage das Gewicht ein, mit dem du 3 Sätze à 3 Wiederholungen schaffst. Der Rechner schätzt das 1RM, wenn der letzte Satz ungefähr RPE 8 erreicht.</p>
+        <div class="max-grid"><label>Squat 3×3<input name="squatTriple" type="number" min="1" step="0.5" placeholder="z. B. 140" required></label><label>Bench 3×3<input name="benchTriple" type="number" min="1" step="0.5" placeholder="z. B. 95" required></label><label>Deadlift 3×3<input name="deadliftTriple" type="number" min="1" step="0.5" placeholder="z. B. 165" required></label></div>
+        <p id="oneRmPreview" class="micro">Geschätztes 1RM wird hier angezeigt. Die errechneten Gewichte gelten für Hauptübungen; Zubehör wird über RPE gesteuert.</p>
+        <div class="form-actions"><button class="button primary" type="submit">Plan erstellen ↗</button><button type="button" class="button ghost" data-back="dashboard">Abbrechen</button></div>
+      </form>
+    </section>
+
+    <section id="planEditorView" class="panel hidden">
+      <button class="back button ghost" data-back="dashboard">← Meine Pläne</button>
+      <div class="eyebrow">PLAN BEARBEITEN</div><h1 id="editorPlanTitle">Dein Plan.</h1>
+      <label class="plan-name-edit">Planname<input id="editorPlanName" maxlength="60"></label>
+      <p id="editorPlanFacts" class="muted"></p>
+      <div class="editor-section-head"><div><div class="eyebrow">TRAININGSTAGE</div><h2>Deine Woche</h2></div><button id="deletePlan" class="button danger">Plan löschen</button></div>
+      <div id="editorDayList" class="editor-day-list"></div>
+    </section>
+
+    <section id="dayEditorView" class="panel hidden">
+      <button class="back button ghost" data-back="planEditorView">← Zurück zum Plan</button>
+      <div class="eyebrow">TAG BEARBEITEN</div><h1 id="dayEditorTitle">Trainingstag</h1>
+      <div class="day-settings"><label>Tag / Einheit<input id="dayNameInput" maxlength="60"></label><label>Training findet statt am<select id="dayWeekday"></select></label></div>
+      <div class="editor-section-head"><div><div class="eyebrow">ÜBUNGEN</div><h2>Einheit aufbauen</h2></div></div>
+      <div id="dayExerciseRows" class="day-exercise-rows"></div>
+      <button id="addExercise" class="button add-exercise"><span>＋</span> Übung hinzufügen</button>
+    </section>
+
+    <section id="workoutView" class="hidden">
+      <button class="back button ghost" data-back="dashboard">← Übersicht</button>
+      <div class="workout-title"><div><div class="eyebrow" id="workoutKicker">TRAINING</div><h1 id="workoutTitle"></h1></div></div>
+      <div id="exerciseList" class="exercise-list"></div>
+      <div class="workout-footer"><button id="finishWorkout" class="button primary full">Training abschließen ✓</button></div>
+    </section>
+
+    <div id="satisfactionModal" class="modal-backdrop hidden" role="presentation">
+      <section class="satisfaction-dialog" role="dialog" aria-modal="true" aria-labelledby="satisfactionTitle">
+        <div class="eyebrow">TRAINING ABSCHLIESSEN</div><h2 id="satisfactionTitle">Wie zufrieden warst du?</h2>
+        <p class="muted">Bewerte deine Leistung von 1 (sehr schlecht) bis 5 (sehr gut).</p>
+        <div class="satisfaction-value"><output id="satisfactionOutput" for="satisfactionSlider">3</output><span id="satisfactionLabel">Okay</span></div>
+        <input id="satisfactionSlider" class="satisfaction-slider" type="range" min="1" max="5" step="1" value="3" aria-label="Zufriedenheit von 1 bis 5">
+        <div class="satisfaction-scale"><span>Sehr schlecht</span><span>Sehr gut</span></div>
+        <button id="confirmWorkout" class="button primary full" aria-label="Training bestätigen">✓ Training bestätigen</button>
+        <button id="cancelWorkout" class="button ghost full">Zurück</button>
+      </section>
+    </div>
+
+    <section id="exerciseView" class="panel hidden">
+      <button class="back button ghost" data-back="dashboard">← Training</button><div class="eyebrow">ÜBUNGSKATALOG</div><h1>Übungen.</h1>
+      <p class="muted">Wähle passende Varianten für deinen Trainingsplan.</p><div class="filter-row"><input id="exerciseSearch" placeholder="Übung suchen …"><select id="muscleFilter"><option value="">Alle Muskelgruppen</option></select></div><div id="catalog" class="catalog"></div>
+    </section>
+  </main>
+  <footer><span>MANAGE MY GAIN</span><button id="catalogLink" class="text-button hidden">Übungskatalog</button><span id="syncStatus">BUILT FOR THE BAR</span></footer>
+  <script src="config.js"></script><script src="app.js"></script><script type="module" src="firebase.js"></script>
+</body>
+</html>

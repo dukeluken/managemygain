@@ -1,0 +1,1 @@
+{"name":"Manage My Gain","short_name":"MMG","description":"Trainingsplan und Log für Kraftdreikampf","start_url":"./","scope":"./","display":"standalone","background_color":"#101312","theme_color":"#101312","icons":[{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}
