@@ -38,7 +38,7 @@ function save() {
     return true;
   }).catch(error => {
     if (state.current === uid && revision === syncRevision) {
-      $('#syncStatus').textContent = 'SYNC FEHLER';
+      $('#syncStatus').textContent = error.code === 'permission-denied' ? 'SYNC: RULES' : `SYNC FEHLER${error.code ? ` · ${error.code}` : ''}`;
       $('#syncStatus').title = `${error.code || 'Fehler'}: ${error.message || 'Daten konnten nicht gespeichert werden.'}`;
     }
     console.warn('Firestore sync failed', error);
@@ -741,6 +741,7 @@ $('#confirmWorkout').onclick = finishWorkout;
 $('#cancelWorkout').onclick = () => { pendingWorkoutDay = null; $('#satisfactionModal').classList.add('hidden'); };
 $('#satisfactionSlider').oninput = updateSatisfactionLabel;
 $('#catalogLink').onclick = openCatalog; $('#exerciseSearch').oninput = renderCatalog; $('#muscleFilter').onchange = renderCatalog;
+$('#syncStatus').onclick = () => { if ($('#syncStatus').title) alert($('#syncStatus').title); };
 $('#planManagerList').addEventListener('click', event => {
   const button = event.target.closest('button[data-edit-plan],button[data-activate-plan],button[data-delete-plan]');
   if (!button) return;
