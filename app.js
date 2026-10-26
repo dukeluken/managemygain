@@ -20,7 +20,7 @@ function cacheState() { localStorage.setItem(KEY, JSON.stringify(state)); }
 function user() { return state.users[state.current]; }
 function getExerciseCatalog() { return user()?.exerciseCatalog || EXERCISES; }
 function activePlan() { const profile = user(); return profile?.plans?.find(plan => plan.id === profile.activePlanId) || profile?.plans?.[0] || null; }
-function selectedPlan() { return user()?.plans?.find(plan => plan.id === editingPlanId) || activePlan(); }
+function selectedPlan() { return user()?.plans?.find(plan => String(plan.id) === String(editingPlanId)) || activePlan(); }
 function save() {
   cacheState();
   if (!state.current || !user() || !window.mmgFirebase?.configured) return;
@@ -268,9 +268,6 @@ function renderTrainingPage() {
 function renderPlanManager() {
   const plans=user().plans||[];
   $('#planManagerList').innerHTML=plans.length?plans.map(plan=>{const selected=plan.id===user().activePlanId;return `<article class="manager-plan-card ${selected?'is-active':''}"><div><strong>${esc(plan.name)}${selected?' <span class="active-badge">AKTIV</span>':''}</strong><span>${plan.frequency} Tage · ${plan.cycleWeeks} Wochen · ${phaseName(plan.phase)} · Fokus ${liftName(plan.focus)} · ${levelName(plan.level)}</span></div><div class="manager-plan-actions"><button class="icon-button ${selected?'selected-plan-action':''}" data-activate-plan="${esc(plan.id)}" aria-label="Plan aktivieren" title="Plan aktivieren">ϟ</button><button class="icon-button" data-edit-plan="${esc(plan.id)}" aria-label="Plan bearbeiten" title="Plan bearbeiten">✎</button><button class="icon-button trash-button" data-delete-plan="${esc(plan.id)}" aria-label="Plan löschen" title="Plan löschen">${TRASH_ICON}</button></div></article>`;}).join(''):'<p class="empty">Noch keine Pläne angelegt.</p>';
-  $$('[data-activate-plan]').forEach(button=>button.onclick=()=>{user().activePlanId=button.dataset.activatePlan;save();renderPlanManager();});
-  $$('[data-edit-plan]').forEach(button=>button.onclick=()=>openPlanEditor(button.dataset.editPlan));
-  $$('[data-delete-plan]').forEach(button=>button.onclick=()=>deletePlanById(button.dataset.deletePlan));
 }function plannedLiftWeights(plan, lift) {
   return Array.from({ length: plan.cycleWeeks || 4 }, (_, weekIndex) => {
     const rows = plan.days.flatMap(day => day.exercises).filter(exercise => exercise.lift === lift && exercise.category === `${lift}Main`)
@@ -377,7 +374,14 @@ function renderHistory() {
     return `<article class="history-item"><strong>${esc(item.name || item.planName)} <span class="history-week">W${item.week || 1}</span></strong><span class="history-time">${esc(timestamp)}</span><span>${item.done}/${item.total} Übungen${liftFacts ? ` · ${esc(liftFacts)}` : ''}</span>${rating ? `<span class="history-rating">Zufriedenheit ${rating}/5 ${'★'.repeat(rating)}${'☆'.repeat(5 - rating)}</span>` : ''}</article>`;
   }).join('') : '<div class="empty">Absolviere dein erstes Training und es erscheint hier.</div>';
 }
-function openPlanEditor(planId) { editingPlanId = planId; renderPlanEditor(); show('planEditorView'); }
+function openPlanEditor(planId) {
+  const plan = user()?.plans?.find(item => String(item.id) === String(planId));
+  if (!plan) return;
+  editingPlanId = plan.id;
+  upgradePlan(plan);
+  renderPlanEditor();
+  show('planEditorView');
+}
 function renderPlanEditor() {
   const plan = selectedPlan(); if (!plan) { renderDashboard(); return; }
   $('#editorPlanTitle').textContent = plan.name; $('#editorPlanName').value = plan.name;
@@ -721,6 +725,14 @@ $('#confirmWorkout').onclick = finishWorkout;
 $('#cancelWorkout').onclick = () => { pendingWorkoutDay = null; $('#satisfactionModal').classList.add('hidden'); };
 $('#satisfactionSlider').oninput = updateSatisfactionLabel;
 $('#catalogLink').onclick = openCatalog; $('#exerciseSearch').oninput = renderCatalog; $('#muscleFilter').onchange = renderCatalog;
+$('#planManagerList').addEventListener('click', event => {
+  const button = event.target.closest('button[data-edit-plan],button[data-activate-plan],button[data-delete-plan]');
+  if (!button) return;
+  event.preventDefault();
+  if (button.hasAttribute('data-edit-plan')) openPlanEditor(button.dataset.editPlan);
+  else if (button.hasAttribute('data-activate-plan')) { user().activePlanId = button.dataset.activatePlan; save(); renderPlanManager(); }
+  else if (button.hasAttribute('data-delete-plan')) deletePlanById(button.dataset.deletePlan);
+});
 $('#openCatalogFromSettings').onclick = openCatalog;
 $('#addCatalogExercise').onclick = () => openCatalogEditor();
 $('#catalogEditorForm').onsubmit = saveCatalogExercise;

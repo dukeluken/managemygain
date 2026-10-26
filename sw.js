@@ -1,4 +1,4 @@
-const CACHE = 'mmg-v14';
+const CACHE = 'mmg-v15';
 const APP_FILES = [
   './',
   './index.html',
