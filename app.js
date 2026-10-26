@@ -15,6 +15,8 @@ let activeDay = 0;
 let editingWorkoutExercise = null;
 let authLoadUid = null;
 let authLoadPromise = null;
+let syncQueue = Promise.resolve();
+let syncRevision = 0;
 function load() { try { return JSON.parse(localStorage.getItem(KEY)) || { users: {}, current: null }; } catch { return { users: {}, current: null }; } }
 function cacheState() { localStorage.setItem(KEY, JSON.stringify(state)); }
 function user() { return state.users[state.current]; }
@@ -23,11 +25,25 @@ function activePlan() { const profile = user(); return profile?.plans?.find(plan
 function selectedPlan() { return user()?.plans?.find(plan => String(plan.id) === String(editingPlanId)) || activePlan(); }
 function save() {
   cacheState();
-  if (!state.current || !user() || !window.mmgFirebase?.configured) return;
-  $('#syncStatus').textContent = 'SYNC';
+  if (!state.current || !user() || !window.mmgFirebase?.configured) return Promise.resolve();
+  const uid = state.current;
+  const revision = ++syncRevision;
+  $('#syncStatus').textContent = 'SYNC…';
+  $('#syncStatus').removeAttribute('title');
   const profile = user();
-  window.mmgFirebase.saveData(state.current, { plans: profile.plans || [], activePlanId: profile.activePlanId || null, plan: activePlan() || null, history: profile.history || [], triples: profile.triples || {}, bodyWeight: profile.bodyWeight ?? '', exerciseCatalog: profile.exerciseCatalog || [] })
-    .then(() => $('#syncStatus').textContent = 'SYNCED').catch(error => { $('#syncStatus').textContent = 'OFFLINE'; console.warn('Firestore sync failed', error); });
+  const data = JSON.parse(JSON.stringify({ plans: profile.plans || [], activePlanId: profile.activePlanId || null, plan: activePlan() || null, history: profile.history || [], triples: profile.triples || {}, bodyWeight: profile.bodyWeight ?? '', exerciseCatalog: profile.exerciseCatalog || [] }));
+  syncQueue = syncQueue.catch(() => {}).then(() => window.mmgFirebase.saveData(uid, data));
+  return syncQueue.then(() => {
+    if (state.current === uid && revision === syncRevision) $('#syncStatus').textContent = 'SYNCED';
+    return true;
+  }).catch(error => {
+    if (state.current === uid && revision === syncRevision) {
+      $('#syncStatus').textContent = 'SYNC FEHLER';
+      $('#syncStatus').title = `${error.code || 'Fehler'}: ${error.message || 'Daten konnten nicht gespeichert werden.'}`;
+    }
+    console.warn('Firestore sync failed', error);
+    return false;
+  });
 }
 function markWeekEdited(plan = selectedPlan()) {
   if (!plan) return;
@@ -400,7 +416,7 @@ function renderEditorLiftProgress(plan) {
     if(!movements.length)return `<article class="lift-progression-card"><strong>${liftName(lift)}</strong><p class="micro">Keine Hauptübung im Plan.</p></article>`;
     const loads=Array.from({length:weeks},(_,wi)=>{const values=movements.map(ex=>Number(ex.weekWeights?.[wi])).filter(value=>Number.isFinite(value)&&value>0);return values.length?values.reduce((sum,value)=>sum+value,0)/values.length:null;});
     const first=loads.find(value=>value!==null),peak=Math.max(...loads.filter(value=>value!==null),1),peakWeek=loads.lastIndexOf(peak),delta=first!==undefined?peak-first:0;
-    const rows=Array.from({length:weeks},(_,wi)=>{const exposures=movements.map(ex=>{const reps=ex.weekReps?.[wi]||ex.reps,sets=ex.weekSets?.[wi]||ex.sets,weight=ex.weekWeights?.[wi];return `${sets}×${esc(reps)} · ${weight?`${esc(weight)} kg`:'—'}`;}).join(' / ');const load=loads[wi]||0;return `<div class="lift-progression-week"><span>W${wi+1}</span><i><b style="width:${load?Math.max(6,Math.round(load/max*100)):0}%"></b></i><small>${exposures}</small></div>`;}).join('');
+    const rows=Array.from({length:weeks},(_,wi)=>{const exposures=movements.map(ex=>{const reps=ex.weekReps?.[wi]||ex.reps,sets=ex.weekSets?.[wi]||ex.sets,weight=ex.weekWeights?.[wi];return `${sets}×${esc(reps)} · ${weight?`${esc(weight)} kg`:'—'}`;}).join(' / ');const load=loads[wi]||0;return `<div class="lift-progression-week"><span>W${wi+1}</span><i><b style="width:${load?Math.max(6,Math.round(load/peak*100)):0}%"></b></i><small>${exposures}</small></div>`;}).join('');
     return `<article class="lift-progression-card"><header><strong>${liftName(lift)}</strong><span>${first!==undefined?`${delta>=0?'+':''}${Math.round(delta*10)/10} kg bis W${peakWeek+1}`:'Keine Lastwerte'}</span></header><div class="lift-progression-weeks">${rows}</div></article>`;
   }).join('');
 }
@@ -448,14 +464,14 @@ function saveDayMetadata() {
   const day = selectedPlan().days[editingDayIndex]; day.name = $('#dayNameInput').value.trim() || `Tag ${String(editingDayIndex + 1).padStart(2, '0')}`; day.weekDay = Number($('#dayWeekday').value); markWeekEdited();
   $('#dayEditorTitle').textContent = day.name; save(); renderPlanEditor();
 }
-function deletePlanById(planId) {
-  const profile=user(),plan=profile.plans?.find(item=>item.id===planId);if(!plan)return;
+async function deletePlanById(planId) {
+  const profile=user(),plan=profile.plans?.find(item=>String(item.id)===String(planId));if(!plan)return;
   const linkedHistory=(profile.history||[]).filter(entry=>entry.planId===plan.id||(!entry.planId&&(entry.planName===plan.name||(!entry.planName&&plan.days.some(day=>day.name===entry.name))))).length;
   if(!confirm(`Plan „${plan.name}“ und ${linkedHistory} zugehörige Historieneinträge löschen?`))return;
   profile.plans=profile.plans.filter(item=>item.id!==plan.id);
   profile.history=(profile.history||[]).filter(entry=>entry.planId?entry.planId!==plan.id:entry.planName?entry.planName!==plan.name:!plan.days.some(day=>day.name===entry.name));
-  if(profile.activePlanId===plan.id)profile.activePlanId=profile.plans[0]?.id||null;
-  editingPlanId=null;save();renderPlanManager();show('planManagerView');
+  if(String(profile.activePlanId)===String(plan.id))profile.activePlanId=profile.plans[0]?.id||null;
+  editingPlanId=null;await save();renderPlanManager();show('planManagerView');
 }
 function deletePlan() { const plan=selectedPlan();if(plan)deletePlanById(plan.id); }
 function updateOneRmPreview() {
@@ -469,7 +485,7 @@ function updateTemplatePreview() {
   const weeks = selectedWeeks && selectedWeeks !== 'auto' ? Number(selectedWeeks) : templateCycleWeeks(Number(data.get('frequency')), data.get('level'));
   $('#templatePreview').textContent = `Vorlage: ${data.get('frequency')} Tage · ${liftName(data.get('focus'))}-Spezialisierung · ${phaseName(data.get('phase'))} · ${levelName(data.get('level'))} · ${weeks} Wochen. Je Einheit vier bis fünf Übungen; Level und Wochenfrequenz steuern Dauer, Verteilung und Belastung.`;
 }
-function createPlan(event) {
+async function createPlan(event) {
   event.preventDefault(); $('#planMessage').textContent = '';
   if (!state.current || !user()) { $('#planMessage').textContent = 'Bitte melde dich zuerst mit deinem Google-Konto an.'; return; }
   const form = new FormData(event.currentTarget || event.target); const frequency = Number(form.get('frequency')); const level = form.get('level'); const startDay = 1; const focus = form.get('focus'); const phase = form.get('phase'); const cycleWeeks = form.get('cycleWeeks') && form.get('cycleWeeks') !== 'auto' ? Number(form.get('cycleWeeks')) : templateCycleWeeks(frequency, level);
@@ -532,7 +548,7 @@ function createPlan(event) {
   const templateId = `${frequency}d-${focus}-${phase}-${level}-v1`;
   const plan = { id: globalThis.crypto?.randomUUID?.() || `plan-${Date.now()}`, templateId, templateName: `${frequency} Tage · ${liftName(focus)}-Spezialisierung · ${phaseName(phase)} · ${levelName(level)}`, name: String(form.get('planName')).trim(), level, frequency, startDay, focus, phase, triples, maxes, setCaps: actualWeeklyTargets, weeklySetTargets: actualWeeklyTargets, currentWeek: 1, cycleWeeks, editedWeeks: [], days };
   const profile = user(); profile.plans ||= []; profile.plans.unshift(plan); profile.activePlanId = plan.id; editingPlanId = plan.id;
-  save(); renderDashboard();
+  await save(); renderDashboard();
 }
 function openWorkout(index) {
   activeDay = index; editingWorkoutExercise = null; const plan = activePlan(); const day = plan.days[index]; $('#workoutTitle').textContent = day.name;
@@ -705,8 +721,8 @@ $('#newPlanCircle').onclick = () => {
   ['squat','bench','deadlift'].forEach(lift=>{const input=$(`#planForm [name="${lift}Triple"]`);input.value=String(defaults[lift]||activePlan()?.triples?.[lift]||'').replace('.',',');});
   updateOneRmPreview();updateTemplatePreview();show('planView');
 };
-$('#planForm').onsubmit = event => {
-  try { createPlan(event); }
+$('#planForm').onsubmit = async event => {
+  try { await createPlan(event); }
   catch (error) {
     console.error('Plan creation failed', error);
     $('#planMessage').textContent = `Der Plan konnte nicht erstellt werden: ${error.message || 'Bitte prüfe deine Eingaben.'}`;
