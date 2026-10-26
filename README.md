@@ -9,7 +9,7 @@ Eine installierbare Web-App für Kraftdreikampf mit Google-Anmeldung, privaten T
 - Mehrere benannte Trainingspläne und Historie in Cloud Firestore. Regeln begrenzen jeden Datensatz auf die angemeldete UID.
 - Plan-Generator mit 72 kombinierten Vorlagen: 2–5 Trainingstage × Squat/Bench/Deadlift-Spezialisierung × Hypertrophie/Kraft × drei Erfahrungsstufen.
 - 3×3-Arbeitsgewichte als Basis eines geschätzten 1RM. Die Schätzung nimmt an, dass der letzte Satz ungefähr RPE 8 erreicht; angegebene Maxima und Startlasten sind Schätzwerte.
-- Achtwöchiger Trainingsblock mit meist vier bis fünf Übungen je Einheit: Erfahrungsstufe steuert Hauptlift-Satzvolumen und RPE-Verlauf. Die Sätze steigen in den Aufbauwochen schrittweise; Woche 4 und 8 sind Deloads.
+- Trainingsblock mit 8, 12 oder 16 Wochen je nach Trainingsstand; bei zwei Trainingstagen wird er um vier Wochen verlängert, bei fünf Tagen um vier verkürzt (mindestens acht Wochen). Alle vier Wochen folgt ein Deload. Je Einheit entstehen vier bis fünf Übungen.
 - Übungskategorien; Kategorie- und Übungswechsel berechnen die Vorgaben neu. Trainingspläne lassen sich tageweise mit Stift-Icon bearbeiten, inklusive Tag, Übungszeilen, Hinzufügen und Entfernen. Im Training gibt es getrennte Felder für geplantes und tatsächlich gehobenes Gewicht.
 
 ## Firebase einrichten — kostenloser Einstieg

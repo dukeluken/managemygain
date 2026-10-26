@@ -2,6 +2,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/fireba
 import {
   getAuth,
   GoogleAuthProvider,
+  getRedirectResult,
   onAuthStateChanged,
   signInWithPopup,
   signInWithRedirect,
@@ -31,16 +32,19 @@ if (!isConfigured) {
     const db = getFirestore(app);
     const google = new GoogleAuthProvider();
     google.setCustomParameters({ prompt: 'select_account' });
+    const completeRedirectSignIn = () => getRedirectResult(auth);
 
     window.mmgFirebase = {
       configured: true,
       signIn: async () => {
-        if (matchMedia('(max-width: 700px)').matches) {
-          return signInWithRedirect(auth, google);
-        }
+        // Use redirect only on Firebase's firebaseapp.com Hosting origin. On
+        // web.app the cross-site redirect state may be blocked by mobile Chrome.
+        if (location.hostname.endsWith('.firebaseapp.com')) return signInWithRedirect(auth, google);
         return signInWithPopup(auth, google);
       },
+      completeRedirectSignIn,
       signOut: () => signOut(auth),
+      currentUser: () => auth.currentUser,
       watchAuth: callback => onAuthStateChanged(auth, callback),
       loadData: async uid => {
         const snapshot = await getDoc(doc(db, 'users', uid));
@@ -51,6 +55,9 @@ if (!isConfigured) {
         activePlanId: data.activePlanId ?? null,
         plan: data.plan ?? null,
         history: data.history ?? [],
+        triples: data.triples ?? {},
+        bodyWeight: data.bodyWeight ?? '',
+        exerciseCatalog: data.exerciseCatalog ?? [],
         updatedAt: serverTimestamp()
       }, { merge: true })
     };
