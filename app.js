@@ -617,8 +617,15 @@ function openCatalogEditor(id = '') {
   const form = $('#catalogEditorForm'); const exercise = getExerciseCatalog().find(item => item.id === id);
   form.reset(); form.elements.id.value = exercise?.id || '';
   form.elements.name.value = exercise?.name || '';
-  form.elements.group.value = exercise?.group || '';
-  form.elements.muscle.value = exercise?.muscle || '';
+  const catalog = getExerciseCatalog();
+  const groups = [...new Set(catalog.map(item => item.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+  const muscles = [...new Set(catalog.map(item => item.muscle).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+  if (exercise?.group && !groups.includes(exercise.group)) groups.push(exercise.group);
+  if (exercise?.muscle && !muscles.includes(exercise.muscle)) muscles.push(exercise.muscle);
+  form.elements.group.innerHTML = groups.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('');
+  form.elements.muscle.innerHTML = muscles.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('');
+  form.elements.group.value = exercise?.group || groups[0] || '';
+  form.elements.muscle.value = exercise?.muscle || muscles[0] || '';
   form.elements.category.innerHTML = TRAINING_CATS.map(([key, label]) => `<option value="${key}" ${key === (exercise ? categoryForExercise(exercise.name) : 'back') ? 'selected' : ''}>${esc(label)}</option>`).join('');
   $('#catalogEditorTitle').textContent = exercise ? 'Übung bearbeiten' : 'Übung hinzufügen';
   $('#catalogEditorModal').classList.remove('hidden'); form.elements.name.focus();
