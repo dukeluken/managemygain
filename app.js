@@ -87,7 +87,15 @@ function buildProfile(firebaseUser, payload, fallback) {
   const exerciseCatalog = (payload?.exerciseCatalog || fallback?.exerciseCatalog || defaultCatalog).map((exercise, index) => { const { muscle, ...clean } = exercise; return { ...clean, id: exercise.id || `exercise-${index + 1}` }; });
   return { displayName: firebaseUser.displayName || fallback?.displayName || 'Athlet', email: firebaseUser.email || fallback?.email || '', plans, activePlanId, history: payload?.history || fallback?.history || [], triples: profileTriples, bodyWeight: payload?.bodyWeight ?? fallback?.bodyWeight ?? '', exerciseCatalog };
 }
-function show(id) {
+function show(id, updateBrowserHistory = true) {
+  if (updateBrowserHistory && state.current && id !== 'authView') {
+    const previous = history.state?.mmgPage;
+    if (previous !== id) {
+      const routeState = { mmgPage: id, mmgParent: previous || null };
+      if (previous) history.pushState(routeState, '', location.href);
+      else history.replaceState(routeState, '', location.href);
+    }
+  }
   ['authView','dashboard','trainingPage','historyPage','planManagerView','settingsView','planView','planEditorView','dayEditorView','workoutView','exerciseView'].forEach(view => $('#' + view).classList.toggle('hidden', view !== id));
   $('#catalogLink').classList.toggle('hidden', !state.current);
   const nav = $('#bottomNav');
@@ -97,6 +105,7 @@ function show(id) {
 }
 function goBack(target) {
   const destination = target || 'dashboard';
+  if (history.state?.mmgParent === destination) { history.back(); return; }
   if (destination === 'planEditorView') renderPlanEditor();
   else if (destination === 'dashboard') renderDashboard();
   else if (destination === 'trainingPage') renderTrainingPage();
@@ -654,7 +663,7 @@ async function sharePlan() {
 }
 function clearShareQuery() {
   const url = new URL(location.href); url.searchParams.delete('share');
-  history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
 }
 async function importPendingSharedPlan() {
   if (!pendingShareId || !state.current || !window.mmgFirebase?.loadSharedPlan) return;
@@ -989,6 +998,11 @@ $('#saveHistoryEdit').onclick = saveHistoryEdit;
 $('#cancelHistoryEdit').onclick = () => { $('#historyEditorModal').classList.add('hidden'); editingHistoryIndex = -1; };
 $('#historyEditorModal').onclick = event => { if (event.target === $('#historyEditorModal')) { $('#historyEditorModal').classList.add('hidden'); editingHistoryIndex = -1; } };
 $('#settingsLogout').onclick = logout;
+window.addEventListener('popstate', event => {
+  const destination = event.state?.mmgPage;
+  if (destination && state.current) show(destination, false);
+  else if (!state.current) show('authView', false);
+});
 document.addEventListener('mmg-firebase-ready', () => {
   if (!window.mmgFirebase?.configured) { $('#authMessage').textContent = 'Firebase einrichten: config.js, Google-Anbieter und Firestore-Regeln.'; return; }
   window.mmgFirebase.watchAuth(handleFirebaseUser);
