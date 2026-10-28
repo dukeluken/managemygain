@@ -59,7 +59,17 @@ if (!isConfigured) {
         bodyWeight: data.bodyWeight ?? '',
         exerciseCatalog: data.exerciseCatalog ?? [],
         updatedAt: serverTimestamp()
-      }, { merge: true })
+      }, { merge: true }),
+      createSharedPlan: (shareId, data) => setDoc(doc(db, 'sharedPlans', shareId), {
+        plan: data.plan,
+        authorName: data.authorName,
+        createdAt: data.createdAt,
+        publishedAt: serverTimestamp()
+      }),
+      loadSharedPlan: async shareId => {
+        const snapshot = await getDoc(doc(db, 'sharedPlans', shareId));
+        return snapshot.exists() ? snapshot.data() : null;
+      }
     };
     ready();
   } catch (error) {

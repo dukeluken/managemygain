@@ -1,9 +1,9 @@
-const CACHE = 'mmg-v17';
+const CACHE = 'mmg-v19';
 const APP_FILES = [
   './',
   './index.html',
   './styles.css',
-  './app.js?v=20261026-2',
+  './app.js?v=20261027-2',
   './firebase.js',
   './config.js',
   './manifest.webmanifest',

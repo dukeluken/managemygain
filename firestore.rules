@@ -11,5 +11,12 @@ service cloud.firestore {
       allow create, update: if isOwner()
         && request.resource.data.keys().hasOnly(['plan', 'plans', 'activePlanId', 'history', 'triples', 'bodyWeight', 'exerciseCatalog', 'updatedAt']);
     }
+
+    match /sharedPlans/{shareId} {
+      allow get: if true;
+      allow list, update, delete: if false;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['plan', 'authorName', 'createdAt', 'publishedAt']);
+    }
   }
 }

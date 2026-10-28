@@ -1,6 +1,6 @@
-﻿const EXERCISES = [
-  ['Wettkampfkniebeuge','Kniebeuge','Kniebeuge'],['Pause Squat','Kniebeuge','Kniebeuge'],['Frontkniebeuge','Kniebeuge','Quadrizeps'],['High-Bar Kniebeuge','Kniebeuge','Quadrizeps'],['Safety-Bar Squat','Kniebeuge','Quadrizeps'],['Beinpresse','Quadrizeps','Quadrizeps'],['Bulgarian Split Squat','Quadrizeps','Quadrizeps'],['Beinstrecker','Quadrizeps','Quadrizeps'],['Rumänisches Kreuzheben','hintere Kette','Hamstrings/Gluteus'],['Beinbeuger liegend','hintere Kette','Hamstrings'],['Beinbeuger sitzend','hintere Kette','Hamstrings'],['Hip Thrust','hintere Kette','Gluteus'],['Good Morning','hintere Kette','Rückenstrecker'],['Wettkampfbankdrücken','Brust','Brust'],['Pause Bankdrücken','Brust','Brust'],['Schrägbankdrücken','Brust','Brust/Schulter'],['Kurzhantel-Bankdrücken','Brust','Brust'],['Kabel-Flys','Brust','Brust'],['Enges Bankdrücken','Trizeps','Trizeps'],['Trizepsdrücken am Kabel','Trizeps','Trizeps'],['Skull Crusher','Trizeps','Trizeps'],['Überkopf-Trizepsstrecken','Trizeps','Trizeps'],['Langhantelrudern','Rücken','oberer Rücken'],['Brustgestütztes Rudern','Rücken','oberer Rücken'],['Latzug','Rücken','Latissimus'],['Klimmzüge','Rücken','Latissimus'],['Face Pulls','Rücken','hintere Schulter'],['Wettkampfkreuzheben','Kreuzheben','hintere Kette'],['Pause Kreuzheben','Kreuzheben','hintere Kette'],['Block Pull','Kreuzheben','hintere Kette'],['Defizit-Kreuzheben','Kreuzheben','hintere Kette'],['Sumo Kreuzheben','Kreuzheben','hintere Kette'],['Seitheben','Schultern','seitliche Schulter'],['Schulterdrücken','Schultern','Schulter'],['Bauchrolle','Core','Bauch'],['Cable Crunch','Core','Bauch'],['Pallof Press','Core','Core'],['Wadenheben','Waden','Wade']
-].map(([name, group, muscle]) => ({ name, group, muscle }));
+const EXERCISES = [
+  ['Wettkampfkniebeuge','Kniebeuge'],['Pause Squat','Kniebeuge'],['Frontkniebeuge','Kniebeuge'],['High-Bar Kniebeuge','Kniebeuge'],['Safety-Bar Squat','Kniebeuge'],['Beinpresse','Quadrizeps'],['Bulgarian Split Squat','Quadrizeps'],['Beinstrecker','Quadrizeps'],['Rumänisches Kreuzheben','hintere Kette'],['Beinbeuger liegend','hintere Kette'],['Beinbeuger sitzend','hintere Kette'],['Hip Thrust','hintere Kette'],['Good Morning','hintere Kette'],['Wettkampfbankdrücken','Brust'],['Pause Bankdrücken','Brust'],['Schrägbankdrücken','Brust'],['Kurzhantel-Bankdrücken','Brust'],['Kabel-Flys','Brust'],['Enges Bankdrücken','Trizeps'],['Trizepsdrücken am Kabel','Trizeps'],['Skull Crusher','Trizeps'],['Überkopf-Trizepsstrecken','Trizeps'],['Langhantelrudern','Rücken'],['Brustgestütztes Rudern','Rücken'],['Latzug','Rücken'],['Klimmzüge','Rücken'],['Face Pulls','Rücken'],['Wettkampfkreuzheben','Kreuzheben'],['Pause Kreuzheben','Kreuzheben'],['Block Pull','Kreuzheben'],['Defizit-Kreuzheben','Kreuzheben'],['Sumo Kreuzheben','Kreuzheben'],['Seitheben','Schultern'],['Schulterdrücken','Schultern'],['Bauchrolle','Core'],['Cable Crunch','Core'],['Pallof Press','Core'],['Wadenheben','Waden']
+].map(([name, group]) => ({ name, group }));
 const TRAINING_CATS = [['squatMain','Main Lift · Squat'],['squatVar','Squat-Assistenz'],['benchMain','Main Lift · Bench'],['benchVar','Bench-Assistenz'],['deadliftMain','Main Lift · Deadlift'],['deadliftVar','Deadlift-Assistenz'],['back','Assistenz · Rücken'],['chest','Assistenz · Brust'],['triceps','Assistenz · Trizeps'],['shoulders','Assistenz · Schultern'],['quads','Assistenz · Quadrizeps'],['hamstrings','Assistenz · hintere Kette'],['core','Assistenz · Core'],['calves','Assistenz · Waden']];
 const CAT_LABEL = Object.fromEntries(TRAINING_CATS);
 const TRASH_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -10,13 +10,16 @@ const $$ = selector => [...document.querySelectorAll(selector)];
 const KEY = 'mmg-firebase-state-v1';
 let state = load();
 let editingPlanId = null;
+let editingPlanWeek = 1;
 let editingDayIndex = 0;
 let activeDay = 0;
+let editingHistoryIndex = -1;
 let editingWorkoutExercise = null;
 let authLoadUid = null;
 let authLoadPromise = null;
 let syncQueue = Promise.resolve();
 let syncRevision = 0;
+const pendingShareId = new URLSearchParams(location.search).get('share');
 function load() { try { return JSON.parse(localStorage.getItem(KEY)) || { users: {}, current: null }; } catch { return { users: {}, current: null }; } }
 function cacheState() { localStorage.setItem(KEY, JSON.stringify(state)); }
 function user() { return state.users[state.current]; }
@@ -45,18 +48,28 @@ function save() {
     return false;
   });
 }
-function markWeekEdited(plan = selectedPlan()) {
+function markWeekEdited(plan = selectedPlan(), weekNumber = Number(plan?.currentWeek || 1)) {
   if (!plan) return;
   plan.editedWeeks ||= [];
-  const week = Number(plan.currentWeek || 1);
+  const week = Number(weekNumber || 1);
   if (!plan.editedWeeks.includes(week)) plan.editedWeeks.push(week);
   plan.editedWeeks.sort((a, b) => a - b);
 }
 function upgradePlan(plan, index = 0) {
   if (!plan) return null;
   plan.id ||= `legacy-plan-${index + 1}`; plan.name ||= 'Mein Trainingsplan'; plan.cycleWeeks ||= 4; plan.currentWeek ||= 1; plan.days ||= []; plan.editedWeeks ||= []; plan.nextDayIndex = Number.isInteger(plan.nextDayIndex) ? plan.nextDayIndex : 0;
+  plan.weeklyProgression ||= { squat: 2.5, bench: 1.25, deadlift: 2.5 };
+  plan.weekTypes ||= Array.from({ length: plan.cycleWeeks }, (_, weekIndex) => (weekIndex + 1) % 4 === 0 ? 'deload' : 'regular');
+  while (plan.weekTypes.length < plan.cycleWeeks) plan.weekTypes.push('regular');
   if (plan.days.length) plan.nextDayIndex = Math.max(0, Math.min(plan.nextDayIndex, plan.days.length - 1));
-  plan.days.forEach((day, dayIndex) => { day.weekDay ??= (Number(plan.startDay || 1) + Math.floor(dayIndex * 7 / Math.max(1, plan.days.length))) % 7; day.exercises ||= []; });
+  plan.days.forEach((day, dayIndex) => {
+    day.weekDay ??= (Number(plan.startDay || 1) + Math.floor(dayIndex * 7 / Math.max(1, plan.days.length))) % 7; day.exercises ||= [];
+    day.exercises.forEach(exercise => {
+      const normalize = (key, fallback) => { exercise[key] = Array.isArray(exercise[key]) ? exercise[key] : Array(plan.cycleWeeks).fill(fallback); while (exercise[key].length < plan.cycleWeeks) exercise[key].push(fallback); };
+      normalize('weekSets', exercise.sets || 1); normalize('weekReps', exercise.reps || 1); normalize('weekRpes', exercise.rpe || 7);
+      normalize('weekWeights', exercise.weight ?? ''); normalize('actualWeights', ''); normalize('actualRpes', ''); normalize('weekWeightOverrides', false);
+    });
+  });
   return plan;
 }
 function buildProfile(firebaseUser, payload, fallback) {
@@ -71,12 +84,12 @@ function buildProfile(firebaseUser, payload, fallback) {
   const planTriples=plans.find(plan=>plan.id===activePlanId)?.triples || plans[0]?.triples || {};
   const profileTriples={...planTriples,...(fallback?.triples||{}),...(payload?.triples||{})};
   const defaultCatalog = EXERCISES.map((exercise, index) => ({ ...exercise, id: `builtin-${index + 1}` }));
-  const exerciseCatalog = (payload?.exerciseCatalog || fallback?.exerciseCatalog || defaultCatalog).map((exercise, index) => ({ ...exercise, id: exercise.id || `exercise-${index + 1}` }));
+  const exerciseCatalog = (payload?.exerciseCatalog || fallback?.exerciseCatalog || defaultCatalog).map((exercise, index) => { const { muscle, ...clean } = exercise; return { ...clean, id: exercise.id || `exercise-${index + 1}` }; });
   return { displayName: firebaseUser.displayName || fallback?.displayName || 'Athlet', email: firebaseUser.email || fallback?.email || '', plans, activePlanId, history: payload?.history || fallback?.history || [], triples: profileTriples, bodyWeight: payload?.bodyWeight ?? fallback?.bodyWeight ?? '', exerciseCatalog };
 }
 function show(id) {
   ['authView','dashboard','trainingPage','historyPage','planManagerView','settingsView','planView','planEditorView','dayEditorView','workoutView','exerciseView'].forEach(view => $('#' + view).classList.toggle('hidden', view !== id));
-  $('#userBadge').classList.toggle('hidden', !state.current); $('#logout').classList.toggle('hidden', !state.current); $('#catalogLink').classList.toggle('hidden', !state.current);
+  $('#catalogLink').classList.toggle('hidden', !state.current);
   const nav = $('#bottomNav');
   nav.classList.toggle('hidden', !state.current || id === 'authView');
   const activePage = ({ workoutView:'trainingPage', planView:'planManagerView', planEditorView:'planManagerView', dayEditorView:'planManagerView', exerciseView:'settingsView' })[id] || id;
@@ -190,16 +203,50 @@ function calcLoad(max, reps, rpe, factor = 1) {
   return roundedWeight(max * Math.max(.5, Math.min(.92, 1 - (repsDone + rir) / 30)) * factor);
 }
 function dayFocus(day) { return liftName(day.exercises.find(exercise => exercise.lift)?.lift); }
-function setDayWeight(exercise, week, value) { const weeks=Number(selectedPlan()?.cycleWeeks)||4;exercise.weekWeights ||= [];while(exercise.weekWeights.length<weeks)exercise.weekWeights.push('');exercise.weekWeights[week - 1] = value; exercise.weight = exercise.weekWeights[0] || ''; }
+function roundKg(value) { return Math.round(Number(value) * 4) / 4; }
+function recalculateExerciseProgression(plan, exercise) {
+  const lift = exercise.lift || catLift(exercise.category);
+  if (!lift || exercise.category !== `${lift}Main`) return;
+  const baseline = parseKg(exercise.weekWeights?.[0]);
+  if (!Number.isFinite(baseline) || baseline <= 0) return;
+  const step = Math.max(0, parseKg(plan.weeklyProgression?.[lift]) || 0);
+  for (let weekIndex = 1; weekIndex < plan.cycleWeeks; weekIndex += 1) {
+    if (exercise.weekWeightOverrides?.[weekIndex]) continue;
+    const progressiveLoad = baseline + step * weekIndex;
+    const deload = plan.weekTypes?.[weekIndex] === 'deload';
+    exercise.weekWeights[weekIndex] = roundKg(deload ? (baseline + step * (weekIndex - 1)) * .9 : progressiveLoad);
+  }
+  exercise.weight = exercise.weekWeights[0] || '';
+}
+function recalculateLiftProgression(plan, lift) {
+  plan.days.forEach(day => day.exercises.forEach(exercise => {
+    if ((exercise.lift || catLift(exercise.category)) === lift && exercise.category === `${lift}Main`) recalculateExerciseProgression(plan, exercise);
+  }));
+}
+function setDayWeight(exercise, week, value, plan = selectedPlan()) {
+  const weeks = Number(plan?.cycleWeeks) || 4;
+  exercise.weekWeights ||= Array(weeks).fill('');
+  exercise.weekWeightOverrides ||= Array(weeks).fill(false);
+  while (exercise.weekWeights.length < weeks) exercise.weekWeights.push('');
+  while (exercise.weekWeightOverrides.length < weeks) exercise.weekWeightOverrides.push(false);
+  exercise.weekWeights[week - 1] = value;
+  const lift = exercise.lift || catLift(exercise.category);
+  if (lift && exercise.category === `${lift}Main`) {
+    exercise.weekWeightOverrides[week - 1] = week > 1;
+    if (week === 1) recalculateExerciseProgression(plan, exercise);
+  }
+  exercise.weight = exercise.weekWeights[0] || '';
+}
 function reprogramExercise(exercise, name, category) {
-  const plan = selectedPlan(); const week = plan.currentWeek || 1; const cycleWeeks = plan.cycleWeeks || 4; const lift = catLift(category); const isMain = Boolean(lift); const variation = category.endsWith('Var'); const phase = plan.phase;
+  const plan = selectedPlan(); const week = editingPlanWeek || 1; const cycleWeeks = plan.cycleWeeks || 4; const lift = catLift(category); const isMain = Boolean(lift); const variation = category.endsWith('Var'); const phase = plan.phase;
   const sets = isMain ? (phase === 'hypertrophy' ? (plan.level === 'beginner' ? 3 : 4) : (plan.level === 'advanced' ? 4 : 3)) : (phase === 'hypertrophy' ? (plan.level === 'beginner' ? 2 : 3) : 2);
   const reps = isMain ? (phase === 'hypertrophy' ? (variation ? 8 : plan.level === 'advanced' ? 5 : 6) : (variation ? 5 : plan.level === 'advanced' ? 3 : 4)) : (phase === 'hypertrophy' ? '8–15' : '6–12');
   const targets = phaseRpeTargets(phase, plan.level, cycleWeeks);
   const weekRpes = targets.map((value, index) => isMain ? Math.max(6, value - (variation ? .5 : 0)) : (index % 4 === 3 ? 6 : Math.max(6, value - 1)));
   exercise.exercise = name; exercise.category = category; exercise.isMain = isMain; exercise.lift = lift; exercise.sets = sets; exercise.reps = reps;
   exercise.weekReps = Array(cycleWeeks).fill(reps); exercise.weekSets = buildWeekSets(sets, isMain ? (phase === 'hypertrophy' ? 6 : 5) : 3, cycleWeeks); exercise.weekRpes = weekRpes;
-  exercise.weekWeights = Array.from({ length: cycleWeeks }, (_, index) => lift ? calcLoad(plan.maxes?.[lift], reps, weekRpes[index], variation ? .9 : 1) : '');
+  exercise.weekWeights = Array.from({ length: cycleWeeks }, (_, index) => lift ? calcLoad(plan.maxes?.[lift], reps, weekRpes[index], variation ? .9 : 1) : ''); exercise.weekWeightOverrides = Array(cycleWeeks).fill(false);
+  if (lift && category === `${lift}Main`) recalculateExerciseProgression(plan, exercise);
   exercise.actualWeights = Array(cycleWeeks).fill(''); exercise.actualRpes = Array(cycleWeeks).fill(''); exercise.done = false; exercise.rpe = exercise.weekRpes[week - 1]; exercise.weight = exercise.weekWeights[week - 1]; exercise.note ||= '';
 }
 function getStartLoad(plan, lift) { const main = plan.days.flatMap(day => day.exercises).find(exercise => exercise.lift === lift); return main?.weekWeights?.[0] || ''; }
@@ -236,9 +283,10 @@ function renderSettingsValues() {
   $('#settingsValues').innerHTML=values.map(([key,label])=>{const value=key==='bodyWeight'?profile.bodyWeight:triples[key];return `<button class="settings-value-row" data-edit-value="${key}"><span>${label}</span><strong>${Number(value)>0?`${esc(value)} kg`:'Wert eingeben'}</strong><span class="settings-edit-icon">✎</span></button>`;}).join('');
   $$('[data-edit-value]').forEach(button=>button.onclick=()=>openNumericKeypad(button.dataset.editValue));
 }
-let keypadTarget=null, keypadValue='', keypadFresh=false, keypadOnConfirm=null;
-function showNumericKeypad(title,value,onConfirm) {
+let keypadTarget=null, keypadValue='', keypadFresh=false, keypadOnConfirm=null, keypadAllowZero=false;
+function showNumericKeypad(title,value,onConfirm,allowZero=false) {
   keypadTarget='weight';keypadValue=String(value??'').replace('.',',');keypadFresh=true;keypadOnConfirm=onConfirm;
+  keypadAllowZero=allowZero;
   $('#keypadTitle').textContent=title;$('#keypadDisplay').textContent=keypadValue||'0';$('#numericKeypad').classList.remove('hidden');
 }
 function openNumericKeypad(target) {
@@ -246,7 +294,7 @@ function openNumericKeypad(target) {
   const title=({squat:'Squat 3×3',bench:'Bench 3×3',deadlift:'Deadlift 3×3',bodyWeight:'Körpergewicht'})[target];
   showNumericKeypad(title,initial,value=>{if(target==='bodyWeight')profile.bodyWeight=value;else{profile.triples||={};profile.triples[target]=value;}save();renderSettingsValues();renderPersonalStats();});
 }
-function openWeightKeypad(value,onConfirm,title='Gewicht (kg)') { showNumericKeypad(title,value,onConfirm); }
+function openWeightKeypad(value,onConfirm,title='Gewicht (kg)',allowZero=false) { showNumericKeypad(title,value,onConfirm,allowZero); }
 function updateKeypad(key) {
   if(key==='backspace'){keypadValue=keypadFresh?'':keypadValue.slice(0,-1);keypadFresh=false;}
   else if(key===','){if(keypadFresh){keypadValue='0,';keypadFresh=false;}else if(!keypadValue.includes(','))keypadValue=keypadValue?`${keypadValue},`:'0,';}
@@ -257,12 +305,12 @@ function stepKeypad(amount) {
   const current=Number(keypadValue.replace(',','.'))||0;keypadValue=String(Math.max(0,Math.round((current+Number(amount))*100)/100)).replace('.',',');keypadFresh=false;$('#keypadDisplay').textContent=keypadValue;
 }
 function confirmKeypad() {
-  const value=Number(keypadValue.replace(',','.'));if(!keypadTarget||!Number.isFinite(value)||value<=0)return;
-  const callback=keypadOnConfirm;$('#numericKeypad').classList.add('hidden');keypadTarget=null;keypadOnConfirm=null;callback?.(value);
+  const value=Number(keypadValue.replace(',','.'));if(!keypadTarget||!Number.isFinite(value)||value<0||(value===0&&!keypadAllowZero))return;
+  const callback=keypadOnConfirm;$('#numericKeypad').classList.add('hidden');keypadTarget=null;keypadOnConfirm=null;keypadAllowZero=false;callback?.(value);
 }
 function renderDashboard() {
   if (!state.current) { show('authView'); return; }
-  show('dashboard'); const profile=user(); $('#userBadge').textContent=profile.email || profile.displayName || '';
+  show('dashboard'); const profile=user();
   $('#hello').textContent=`Hey, ${(profile.displayName||'Athlet').split(' ')[0]}.`; renderPersonalStats();
   const plan=activePlan();
   if(!plan){$('#activePlanSection').classList.add('hidden');$('#todaySessionCard').innerHTML='<p class="empty">Noch kein aktiver Plan. Erstelle unten unter „Pläne“ deinen ersten Plan.</p>';$('#upcomingSessions').innerHTML='';return;}
@@ -271,7 +319,7 @@ function renderDashboard() {
   const upcoming=Array.from({length:Math.min(3,Math.max(0,plan.days.length-1))},(_,offset)=>(current+offset+1)%plan.days.length);
   $('#upcomingSessions').innerHTML=upcoming.length?upcoming.map(index=>{const day=plan.days[index],main=day.exercises.find(ex=>ex.lift&&ex.category===`${ex.lift}Main`)||day.exercises.find(ex=>ex.isMain),week=(plan.currentWeek||1)-1;const sets=main?.weekSets?.[week]||main?.sets,reps=main?.weekReps?.[week]||main?.reps,weight=main?.weekWeights?.[week],rpe=main?.weekRpes?.[week]||main?.rpe;return `<button class="upcoming-row" data-upcoming="${index}"><span>W${plan.currentWeek}-D${index+1}</span><strong>${esc(day.name)}</strong><small>${esc(dayName(day.weekDay))} · ${main?`${sets} × ${esc(reps)}${weight?` · ${esc(weight)} kg`:''} · RPE ${esc(rpe||'—')}`:`${day.exercises.length} Übungen`}</small></button>`;}).join(''):'<p class="empty">Für diese Woche sind keine weiteren Einheiten geplant.</p>';
   $$('[data-upcoming]').forEach(button=>button.onclick=()=>openWorkout(Number(button.dataset.upcoming)));
-  $('#progressGraphs').innerHTML=['squat','bench','deadlift'].map(lift=>renderLiftGraph(plan,lift)).join('');
+  $('#progressGraphs').innerHTML=['squat','bench'].map(lift=>renderLiftGraph(plan,lift)).join('');
 }
 function renderTrainingPage() {
   const plan=activePlan();
@@ -283,7 +331,7 @@ function renderTrainingPage() {
 }
 function renderPlanManager() {
   const plans=user().plans||[];
-  $('#planManagerList').innerHTML=plans.length?plans.map(plan=>{const selected=plan.id===user().activePlanId;return `<article class="manager-plan-card ${selected?'is-active':''}"><div><strong>${esc(plan.name)}${selected?' <span class="active-badge">AKTIV</span>':''}</strong><span>${plan.frequency} Tage · ${plan.cycleWeeks} Wochen · ${phaseName(plan.phase)} · Fokus ${liftName(plan.focus)} · ${levelName(plan.level)}</span></div><div class="manager-plan-actions"><button class="icon-button ${selected?'selected-plan-action':''}" data-activate-plan="${esc(plan.id)}" aria-label="Plan aktivieren" title="Plan aktivieren">ϟ</button><button class="icon-button" data-edit-plan="${esc(plan.id)}" aria-label="Plan bearbeiten" title="Plan bearbeiten">✎</button><button class="icon-button trash-button" data-delete-plan="${esc(plan.id)}" aria-label="Plan löschen" title="Plan löschen">${TRASH_ICON}</button></div></article>`;}).join(''):'<p class="empty">Noch keine Pläne angelegt.</p>';
+  $('#planManagerList').innerHTML=plans.length?plans.map(plan=>{const selected=plan.id===user().activePlanId,created=plan.createdAt?new Date(plan.createdAt).toLocaleDateString('de-DE'):'';return `<article class="manager-plan-card ${selected?'is-active':''}"><div><strong>${esc(plan.name)}${selected?' <span class="active-badge">AKTIV</span>':''}</strong><span>${plan.frequency} Tage · ${plan.cycleWeeks} Wochen · ${phaseName(plan.phase)} · Fokus ${liftName(plan.focus)} · ${levelName(plan.level)}</span>${plan.authorName||created?`<small>${plan.authorName?`Autor: ${esc(plan.authorName)}`:''}${plan.authorName&&created?' · ':''}${created?`Erstellt am ${esc(created)}`:''}</small>`:''}</div><div class="manager-plan-actions"><button class="icon-button ${selected?'selected-plan-action':''}" data-activate-plan="${esc(plan.id)}" aria-label="Plan aktivieren" title="Plan aktivieren">ϟ</button><button class="icon-button" data-edit-plan="${esc(plan.id)}" aria-label="Plan bearbeiten" title="Plan bearbeiten">✎</button><button class="icon-button trash-button" data-delete-plan="${esc(plan.id)}" aria-label="Plan löschen" title="Plan löschen">${TRASH_ICON}</button></div></article>`;}).join(''):'<p class="empty">Noch keine Pläne angelegt.</p>';
 }function plannedLiftWeights(plan, lift) {
   return Array.from({ length: plan.cycleWeeks || 4 }, (_, weekIndex) => {
     const rows = plan.days.flatMap(day => day.exercises).filter(exercise => exercise.lift === lift && exercise.category === `${lift}Main`)
@@ -305,8 +353,8 @@ function equivalentLoadAtRpe(weight, reps, actualRpe, targetRpe) {
   return Math.round(max * targetIntensity * 10) / 10;
 }
 function liftFromHistoryLoad(load) {
-  if (['squat','bench','deadlift'].includes(load.lift)) return load.lift;
-  if (load.category && ['squat','bench','deadlift'].some(lift => load.category === `${lift}Main`)) return load.category.replace('Main', '');
+  if (['squat','bench'].includes(load.lift)) return load.lift;
+  if (load.category && ['squat','bench'].some(lift => load.category === `${lift}Main`)) return load.category.replace('Main', '');
   return ({ 'Wettkampfkniebeuge': 'squat', 'Wettkampfbankdrücken': 'bench', 'Wettkampfkreuzheben': 'deadlift' })[load.exercise] || null;
 }
 function actualLiftWeeks(plan, lift) {
@@ -382,36 +430,86 @@ function renderLiftGraph(plan, lift) {
 }
 function renderHistory() {
   const plan=activePlan();
-  const history=plan?(user().history||[]).filter(item=>item.planId?item.planId===plan.id:item.planName?item.planName===plan.name:plan.days.some(day=>day.name===item.name)):[];
-  $('#historyList').innerHTML = history.length ? history.map(item => {
+  const allHistory = user().history || [];
+  const history=plan?allHistory.map((item,index)=>({item,index})).filter(({item})=>item.planId?String(item.planId)===String(plan.id):item.planName?item.planName===plan.name:plan.days.some(day=>day.name===item.name)):[];
+  $('#historyList').innerHTML = history.length ? history.map(({item,index}) => {
     const timestamp = new Date(item.date).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' });
     const liftFacts = (item.loads || []).filter(load => load.lift && (load.actual || load.planned)).map(load => `${liftName(load.lift)} ${load.actual || load.planned} kg`).filter((fact, index, list) => list.indexOf(fact) === index).join(' · ');
     const rating = Number(item.satisfaction);
-    return `<article class="history-item"><strong>${esc(item.name || item.planName)} <span class="history-week">W${item.week || 1}</span></strong><span class="history-time">${esc(timestamp)}</span><span>${item.done}/${item.total} Übungen${liftFacts ? ` · ${esc(liftFacts)}` : ''}</span>${rating ? `<span class="history-rating">Zufriedenheit ${rating}/5 ${'★'.repeat(rating)}${'☆'.repeat(5 - rating)}</span>` : ''}</article>`;
+    return `<article class="history-item"><div class="history-item-main"><strong>${esc(item.name || item.planName)} <span class="history-week">W${item.week || 1}</span></strong><span class="history-time">${esc(timestamp)}</span><span>${item.done}/${item.total} Übungen${liftFacts ? ` · ${esc(liftFacts)}` : ''}</span>${rating ? `<span class="history-rating">Zufriedenheit ${rating}/5 ${'★'.repeat(rating)}${'☆'.repeat(5 - rating)}</span>` : ''}</div><button class="icon-button" data-edit-history="${index}" aria-label="Training bearbeiten" title="Training bearbeiten">✎</button></article>`;
   }).join('') : '<div class="empty">Absolviere dein erstes Training und es erscheint hier.</div>';
+  $$('[data-edit-history]').forEach(button => button.onclick = () => openHistoryEditor(Number(button.dataset.editHistory)));
+}
+function openHistoryEditor(index) {
+  const entry = user()?.history?.[index]; if (!entry) return;
+  editingHistoryIndex = index;
+  $('#historyEditorTitle').textContent = `${entry.name || entry.planName} · W${entry.week || 1}`;
+  $('#historyEditorRating').value = String(entry.satisfaction || 3);
+  $('#historyEditorRows').innerHTML = (entry.loads || []).map((load, loadIndex) => `<article class="history-edit-row"><div><strong>${esc(load.exercise || liftName(load.lift))}</strong><small>${load.planned ? `Plan ${esc(load.planned)} kg · ` : ''}${load.reps ? `${esc(load.reps)} Wdh.` : ''}</small></div><label>Geschafft (kg)<input class="weight-field" type="text" inputmode="none" readonly data-history-weight="${loadIndex}" value="${esc(load.actual ?? '')}" placeholder="Gewicht eintragen"></label><label>RPE geschafft<input type="number" min="5" max="10" step="0.5" data-history-rpe="${loadIndex}" value="${esc(load.actualRpe || load.plannedRpe || 7)}"></label><label>Notiz<input type="text" maxlength="240" data-history-note="${loadIndex}" value="${esc(load.note || '')}" placeholder="Notiz hinzufügen"></label></article>`).join('') || '<p class="empty">Für dieses Training sind keine Übungsdetails gespeichert.</p>';
+  $$('[data-history-weight]').forEach(input => input.onclick = () => openWeightKeypad(input.value, value => { input.value = String(value).replace('.', ','); }, 'Geschafftes Gewicht (kg)'));
+  $('#historyEditorModal').classList.remove('hidden');
+}
+function saveHistoryEdit() {
+  const entry = user()?.history?.[editingHistoryIndex]; if (!entry) return;
+  entry.loads ||= [];
+  entry.loads.forEach((load, index) => {
+    const weightInput = $(`[data-history-weight="${index}"]`);
+    const rpeInput = $(`[data-history-rpe="${index}"]`);
+    const noteInput = $(`[data-history-note="${index}"]`);
+    if (weightInput) load.actual = weightInput.value.trim() ? parseKg(weightInput.value) : '';
+    if (rpeInput) load.actualRpe = Number(rpeInput.value) || load.plannedRpe || 7;
+    if (noteInput) load.note = noteInput.value.trim();
+  });
+  entry.satisfaction = Number($('#historyEditorRating').value);
+  const plan = user().plans?.find(item => String(item.id) === String(entry.planId));
+  const day = plan?.days?.[Number(entry.dayIndex)];
+  if (day && plan) entry.loads.forEach((load, index) => {
+    const exercise = day.exercises[index]; if (!exercise) return;
+    exercise.actualWeights ||= Array(plan.cycleWeeks).fill(''); exercise.actualRpes ||= Array(plan.cycleWeeks).fill('');
+    exercise.actualWeights[Number(entry.week || 1) - 1] = load.actual || '';
+    exercise.actualRpes[Number(entry.week || 1) - 1] = load.actualRpe || '';
+  });
+  save(); $('#historyEditorModal').classList.add('hidden'); editingHistoryIndex = -1; renderHistory();
 }
 function openPlanEditor(planId) {
   const plan = user()?.plans?.find(item => String(item.id) === String(planId));
   if (!plan) return;
   editingPlanId = plan.id;
+  editingPlanWeek = 1;
   upgradePlan(plan);
   renderPlanEditor();
   show('planEditorView');
 }
 function renderPlanEditor() {
   const plan = selectedPlan(); if (!plan) { renderDashboard(); return; }
+  editingPlanWeek = Math.max(1, Math.min(Number(editingPlanWeek) || 1, Number(plan.cycleWeeks) || 1));
+  const weekIndex = editingPlanWeek - 1;
   $('#editorPlanTitle').textContent = plan.name; $('#editorPlanName').value = plan.name;
-  $('#editorPlanFacts').textContent = `${plan.frequency} Trainingstage · ${plan.cycleWeeks || 4} Wochen · ${phaseName(plan.phase)} · Fokus ${liftName(plan.focus)}`;
+  const createdDate = plan.createdAt ? new Date(plan.createdAt).toLocaleDateString('de-DE') : '';
+  $('#editorPlanAttribution').textContent = `${plan.authorName ? `Autor: ${plan.authorName}` : ''}${plan.authorName && createdDate ? ' · ' : ''}${createdDate ? `Erstellt am ${createdDate}` : ''}`;
+  $('#editorPlanFacts').textContent = `${plan.frequency} Trainingstage · ${plan.cycleWeeks || 4} Wochen · ${phaseName(plan.phase)} · Fokus ${liftName(plan.focus)}${plan.weekTypes?.[weekIndex] === 'deload' ? ' · Deload-Woche' : ''}`;
+  $('#editorWeekSelect').innerHTML = Array.from({ length: plan.cycleWeeks }, (_, index) => `<option value="${index + 1}" ${index + 1 === editingPlanWeek ? 'selected' : ''}>Woche ${index + 1}${plan.weekTypes?.[index] === 'deload' ? ' · Deload' : ''}</option>`).join('');
+  $$('[data-plan-progression]').forEach(input => { input.value = String(plan.weeklyProgression?.[input.dataset.planProgression] ?? 0).replace('.', ','); });
   $('#editorDayList').innerHTML = plan.days.map((day, index) => `<article class="editor-day-card">
     <div class="editor-day-top"><div><div class="eyebrow">${esc(dayName(day.weekDay).toUpperCase())} · TAG ${String(index + 1).padStart(2, '0')} · FOKUS ${esc(dayFocus(day).toUpperCase())}</div><h3>${esc(day.name)}</h3></div><button class="icon-button" data-edit-day="${index}" aria-label="Tag bearbeiten" title="Tag bearbeiten">✎</button></div>
-    <div class="editor-day-exercises">${day.exercises.map(exercise => `<div class="editor-exercise-summary"><span>${esc(CAT_LABEL[exercise.category] || 'Assistenz')}</span><strong>${esc(exercise.exercise)}</strong><span>${exercise.sets} × ${esc(exercise.reps)} · ${exercise.weekWeights?.[0] || '–'} kg · RPE ${exercise.weekRpes?.[0] || exercise.rpe || 7}</span></div>`).join('') || '<p class="micro">Noch keine Übungen.</p>'}</div>
+    <div class="editor-day-exercises">${day.exercises.map(exercise => `<div class="editor-exercise-summary"><span>${esc(CAT_LABEL[exercise.category] || 'Assistenz')}</span><strong>${esc(exercise.exercise)}</strong><span>${exercise.weekSets?.[weekIndex] || exercise.sets} × ${esc(exercise.weekReps?.[weekIndex] || exercise.reps)} · ${exercise.weekWeights?.[weekIndex] || '–'} kg · RPE ${exercise.weekRpes?.[weekIndex] || exercise.rpe || 7}</span></div>`).join('') || '<p class="micro">Noch keine Übungen.</p>'}</div>
   </article>`).join('');
   $('#editorLiftProgress').innerHTML=renderEditorLiftProgress(plan);
+  $('#editorWeekSelect').onchange = event => { editingPlanWeek = Number(event.target.value); renderPlanEditor(); };
+  $$('[data-plan-progression]').forEach(input => input.onclick = () => {
+    const lift = input.dataset.planProgression;
+    openWeightKeypad(input.value, value => {
+      plan.weeklyProgression[lift] = Math.max(0, parseKg(value) || 0);
+      recalculateLiftProgression(plan, lift); save(); renderPlanEditor();
+    }, `${liftName(lift)}-Steigerung pro Woche (kg)`, true);
+  });
+  $('#appendPlanWeek').onclick = appendPlanWeek;
+  $('#deletePlanWeek').disabled = Number(plan.cycleWeeks) <= 1;
   $$('[data-edit-day]').forEach(button => button.onclick = () => openDayEditor(+button.dataset.editDay));
 }
 function renderEditorLiftProgress(plan) {
   const weeks=Number(plan.cycleWeeks)||4;
-  return ['squat','bench','deadlift'].map(lift=>{
+  return ['squat','bench'].map(lift=>{
     const movements=plan.days.flatMap(day=>day.exercises).filter(ex=>ex.lift===lift&&ex.category===`${lift}Main`);
     if(!movements.length)return `<article class="lift-progression-card"><strong>${liftName(lift)}</strong><p class="micro">Keine Hauptübung im Plan.</p></article>`;
     const loads=Array.from({length:weeks},(_,wi)=>{const values=movements.map(ex=>Number(ex.weekWeights?.[wi])).filter(value=>Number.isFinite(value)&&value>0);return values.length?values.reduce((sum,value)=>sum+value,0)/values.length:null;});
@@ -420,49 +518,103 @@ function renderEditorLiftProgress(plan) {
     return `<article class="lift-progression-card"><header><strong>${liftName(lift)}</strong><span>${first!==undefined?`${delta>=0?'+':''}${Math.round(delta*10)/10} kg bis W${peakWeek+1}`:'Keine Lastwerte'}</span></header><div class="lift-progression-weeks">${rows}</div></article>`;
   }).join('');
 }
+function appendPlanWeek() {
+  const plan = selectedPlan(); if (!plan) return;
+  const type = $('#appendWeekType').value;
+  const nextIndex = Number(plan.cycleWeeks) || 0;
+  const newWeekCount = nextIndex + 1;
+  const rpeTargets = phaseRpeTargets(plan.phase, plan.level, newWeekCount);
+  plan.days.forEach(day => day.exercises.forEach(exercise => {
+    const previousIndex = nextIndex - 1;
+    const isMain = Boolean(exercise.lift && exercise.category === `${exercise.lift}Main`);
+    const previousSets = Number(exercise.weekSets?.[previousIndex] || exercise.sets || 1);
+    const previousWeight = parseKg(exercise.weekWeights?.[previousIndex]);
+    exercise.weekSets.push(type === 'deload' ? Math.max(1, Math.ceil(previousSets * .6)) : (plan.weekTypes?.[previousIndex] === 'deload' ? Number(exercise.weekSets?.[0] || exercise.sets || 1) : previousSets));
+    exercise.weekReps.push(exercise.weekReps?.[previousIndex] || exercise.reps);
+    exercise.weekRpes.push(type === 'deload' ? 6 : (plan.weekTypes?.[previousIndex] === 'deload' ? Number(exercise.weekRpes?.[0] || rpeTargets[nextIndex] || 7) : Number(exercise.weekRpes?.[previousIndex] || rpeTargets[nextIndex] || 7)));
+    if (isMain && type === 'regular') {
+      const baseline = parseKg(exercise.weekWeights[0]);
+      const step = Math.max(0, parseKg(plan.weeklyProgression?.[exercise.lift]) || 0);
+      exercise.weekWeights.push(Number.isFinite(baseline) && baseline > 0 ? roundKg(baseline + step * nextIndex) : (Number.isFinite(previousWeight) ? previousWeight : ''));
+      exercise.weekWeightOverrides.push(false);
+    } else {
+      const addedWeight = Number.isFinite(previousWeight) && previousWeight > 0 ? roundKg(type === 'deload' ? previousWeight * .9 : previousWeight) : '';
+      exercise.weekWeights.push(addedWeight);
+      exercise.weekWeightOverrides.push(type === 'deload');
+    }
+    exercise.actualWeights.push(''); exercise.actualRpes.push('');
+  }));
+  plan.weekTypes.push(type); plan.cycleWeeks = newWeekCount; editingPlanWeek = newWeekCount;
+  save(); renderPlanEditor();
+}
+function deletePlanWeek() {
+  const plan = selectedPlan(); if (!plan) return;
+  const week = Number(editingPlanWeek) || 1;
+  if (Number(plan.cycleWeeks) <= 1) { alert('Ein Plan muss mindestens eine Woche enthalten.'); return; }
+  const isPlanHistory = entry => entry.planId ? String(entry.planId) === String(plan.id) : entry.planName ? entry.planName === plan.name : plan.days.some(day => day.name === entry.name);
+  const historyCount = (user().history || []).filter(entry => isPlanHistory(entry) && Number(entry.week) === week).length;
+  const confirmText = `Woche ${week}${historyCount ? ` und ${historyCount} zugehörige Historieneinträge` : ''} löschen? Alle folgenden Wochen rücken eine Woche nach vorn.`;
+  if (!confirm(confirmText)) return;
+  plan.days.forEach(day => day.exercises.forEach(exercise => {
+    ['weekSets','weekReps','weekRpes','weekWeights','weekWeightOverrides','actualWeights','actualRpes'].forEach(key => exercise[key]?.splice(week - 1, 1));
+    exercise.sets = exercise.weekSets?.[0] ?? exercise.sets;
+    exercise.reps = exercise.weekReps?.[0] ?? exercise.reps;
+    exercise.rpe = exercise.weekRpes?.[0] ?? exercise.rpe;
+    exercise.weight = exercise.weekWeights?.[0] ?? exercise.weight;
+  }));
+  plan.weekTypes?.splice(week - 1, 1);
+  plan.cycleWeeks = Math.max(1, Number(plan.cycleWeeks) - 1);
+  plan.editedWeeks = (plan.editedWeeks || []).filter(item => Number(item) !== week).map(item => Number(item) > week ? Number(item) - 1 : Number(item));
+  user().history = (user().history || []).filter(entry => !(isPlanHistory(entry) && Number(entry.week) === week));
+  user().history.forEach(entry => { if (isPlanHistory(entry) && Number(entry.week) > week) entry.week = Number(entry.week) - 1; });
+  if (Number(plan.currentWeek) > week) plan.currentWeek -= 1;
+  else if (Number(plan.currentWeek) === week) plan.currentWeek = Math.min(week, plan.cycleWeeks);
+  editingPlanWeek = Math.min(week, plan.cycleWeeks);
+  save(); renderPlanEditor();
+}
 function openDayEditor(index) {
   editingDayIndex = index; const day = selectedPlan().days[index];
-  $('#dayEditorTitle').textContent = day.name; $('#dayNameInput').value = day.name;
+  $('#dayEditorTitle').textContent = `W${editingPlanWeek} · ${day.name}`; $('#dayNameInput').value = day.name;
   $('#dayWeekday').innerHTML = WEEKDAYS.map((name, value) => `<option value="${value}" ${Number(day.weekDay) === value ? 'selected' : ''}>${name}</option>`).join('');
   renderDayExerciseRows(); show('dayEditorView');
 }
 function makeExerciseRow(exercise, index) {
-  const options = getExerciseCatalog().filter(item => categoryForExercise(item.name) === exercise.category); const week = selectedPlan().currentWeek || 1;
+  const options = getExerciseCatalog().filter(item => categoryForExercise(item.name) === exercise.category); const week = editingPlanWeek || 1;
   return `<article class="plan-exercise-row" data-exercise-row="${index}">
     <div class="plan-exercise-selects"><label>Kategorie<select data-row-category="${index}">${TRAINING_CATS.map(([id, label]) => `<option value="${id}" ${id === exercise.category ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label><label>Übung<select data-row-exercise="${index}">${options.map(item => `<option value="${esc(item.name)}" ${item.name === exercise.exercise ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label></div>
-    <div class="plan-exercise-prescription"><label>Sätze<input data-row-field="sets" data-row-index="${index}" type="number" min="1" max="10" value="${exercise.weekSets?.[week - 1] || exercise.sets}"></label><label>Wdh.<input data-row-field="reps" data-row-index="${index}" value="${esc(exercise.reps)}"></label><label>Gewicht (kg)<button type="button" class="weight-field" data-row-weight="${index}">${exercise.weekWeights?.[week - 1]?`${esc(exercise.weekWeights[week - 1])} kg`:'Wert eingeben'}</button></label><label>RPE<input data-row-field="rpe" data-row-index="${index}" type="number" min="5" max="10" step="0.5" value="${exercise.weekRpes?.[week - 1] || exercise.rpe || 7}"></label><button class="icon-button trash-button delete-exercise" data-delete-exercise="${index}" aria-label="Übung löschen" title="Übung löschen">${TRASH_ICON}</button></div>
+    <div class="plan-exercise-prescription"><label>Sätze<input data-row-field="sets" data-row-index="${index}" type="number" min="1" max="10" value="${exercise.weekSets?.[week - 1] || exercise.sets}"></label><label>Wdh.<input data-row-field="reps" data-row-index="${index}" value="${esc(exercise.weekReps?.[week - 1] || exercise.reps)}"></label><label>Gewicht (kg)<button type="button" class="weight-field" data-row-weight="${index}">${exercise.weekWeights?.[week - 1]?`${esc(exercise.weekWeights[week - 1])} kg`:'Wert eingeben'}</button></label><label>RPE<input data-row-field="rpe" data-row-index="${index}" type="number" min="5" max="10" step="0.5" value="${exercise.weekRpes?.[week - 1] || exercise.rpe || 7}"></label><button class="icon-button trash-button delete-exercise" data-delete-exercise="${index}" aria-label="Übung löschen" title="Übung löschen">${TRASH_ICON}</button></div>
   </article>`;
 }
 function renderDayExerciseRows() {
-  const day = selectedPlan().days[editingDayIndex]; $('#dayEditorTitle').textContent = day.name;
+  const day = selectedPlan().days[editingDayIndex]; $('#dayEditorTitle').textContent = `W${editingPlanWeek} · ${day.name}`;
   $('#dayExerciseRows').innerHTML = day.exercises.map(makeExerciseRow).join('') || '<p class="empty">Noch keine Übungen in diesem Trainingstag.</p>';
   $$('[data-row-category]').forEach(select => select.onchange = () => {
     const exercise = day.exercises[+select.dataset.rowCategory]; const replacement = getExerciseCatalog().find(item => categoryForExercise(item.name) === select.value);
-    if (replacement) { reprogramExercise(exercise, replacement.name, select.value); markWeekEdited(); save(); renderDayExerciseRows(); renderPlanEditor(); }
+    if (replacement) { reprogramExercise(exercise, replacement.name, select.value); markWeekEdited(selectedPlan(), editingPlanWeek); save(); renderDayExerciseRows(); renderPlanEditor(); }
   });
   $$('[data-row-exercise]').forEach(select => select.onchange = () => {
-    const exercise = day.exercises[+select.dataset.rowExercise]; reprogramExercise(exercise, select.value, exercise.category); markWeekEdited(); save(); renderDayExerciseRows(); renderPlanEditor();
+    const exercise = day.exercises[+select.dataset.rowExercise]; reprogramExercise(exercise, select.value, exercise.category); markWeekEdited(selectedPlan(), editingPlanWeek); save(); renderDayExerciseRows(); renderPlanEditor();
   });
-  $$('[data-row-weight]').forEach(button=>button.onclick=()=>{const index=Number(button.dataset.rowWeight),exercise=day.exercises[index],plan=selectedPlan(),week=plan.currentWeek||1;openWeightKeypad(exercise.weekWeights?.[week-1]??'',value=>{setDayWeight(exercise,week,value);markWeekEdited(plan);save();renderDayExerciseRows();renderPlanEditor();},`${exercise.exercise} · Gewicht (kg)`);});
+  $$('[data-row-weight]').forEach(button=>button.onclick=()=>{const index=Number(button.dataset.rowWeight),exercise=day.exercises[index],plan=selectedPlan(),week=editingPlanWeek||1;openWeightKeypad(exercise.weekWeights?.[week-1]??'',value=>{setDayWeight(exercise,week,value,plan);markWeekEdited(plan,week);save();renderDayExerciseRows();renderPlanEditor();},`${exercise.exercise} · W${week} · Gewicht (kg)`);});
   $$('[data-row-field]').forEach(input => input.onchange = () => {
-    const exercise = day.exercises[+input.dataset.rowIndex]; const plan = selectedPlan(); const week = plan.currentWeek || 1; const field = input.dataset.rowField;
+    const exercise = day.exercises[+input.dataset.rowIndex]; const plan = selectedPlan(); const week = editingPlanWeek || 1; const field = input.dataset.rowField;
     const cycleWeeks = plan.cycleWeeks || 4;
-    if (field === 'sets') { exercise.sets = Number(input.value); exercise.weekSets ||= Array(cycleWeeks).fill(exercise.sets); exercise.weekSets[week - 1] = Number(input.value); }
-    else if (field === 'reps') { exercise.reps = input.value; exercise.weekReps = Array(cycleWeeks).fill(input.value); if (exercise.lift) exercise.weekWeights = Array.from({ length: cycleWeeks }, (_, index) => calcLoad(plan.maxes?.[exercise.lift], exercise.reps, exercise.weekRpes?.[index] || cycleRpe(index + 1), exercise.category.endsWith('Var') ? .9 : 1)); }
-    else if (field === 'rpe') { exercise.weekRpes ||= Array.from({ length: cycleWeeks }, (_, index) => cycleRpe(index + 1)); exercise.weekRpes[week - 1] = Number(input.value); exercise.rpe = Number(input.value); if (exercise.lift) setDayWeight(exercise, week, calcLoad(plan.maxes?.[exercise.lift], exercise.reps, Number(input.value), exercise.category.endsWith('Var') ? .9 : 1)); }
+    if (field === 'sets') { exercise.weekSets ||= Array(cycleWeeks).fill(exercise.sets); exercise.weekSets[week - 1] = Number(input.value); if (week === 1) exercise.sets = Number(input.value); }
+    else if (field === 'reps') { exercise.weekReps ||= Array(cycleWeeks).fill(exercise.reps); exercise.weekReps[week - 1] = input.value; if (week === 1) exercise.reps = input.value; }
+    else if (field === 'rpe') { exercise.weekRpes ||= Array.from({ length: cycleWeeks }, (_, index) => cycleRpe(index + 1)); exercise.weekRpes[week - 1] = Number(input.value); if (week === 1) exercise.rpe = Number(input.value); }
     else if (field === 'weight') setDayWeight(exercise, week, parseKg(input.value));
-    markWeekEdited(plan); save(); renderDayExerciseRows(); renderPlanEditor();
+    markWeekEdited(plan, week); save(); renderDayExerciseRows(); renderPlanEditor();
   });
-  $$('[data-delete-exercise]').forEach(button => button.onclick = () => { day.exercises.splice(+button.dataset.deleteExercise, 1); markWeekEdited(); save(); renderDayExerciseRows(); renderPlanEditor(); });
+  $$('[data-delete-exercise]').forEach(button => button.onclick = () => { day.exercises.splice(+button.dataset.deleteExercise, 1); markWeekEdited(selectedPlan(), editingPlanWeek); save(); renderDayExerciseRows(); renderPlanEditor(); });
 }
 function addExerciseToDay() {
   const plan = selectedPlan(); const day = plan.days[editingDayIndex]; const category = 'back'; const first = getExerciseCatalog().find(item => categoryForExercise(item.name) === category); const cycleWeeks = plan.cycleWeeks || 4; const sets = plan.phase === 'hypertrophy' ? (plan.level === 'beginner' ? 2 : 3) : (plan.level === 'advanced' ? 3 : 2); const reps = plan.phase === 'hypertrophy' ? '8–15' : '6–12'; const targets = phaseRpeTargets(plan.phase, plan.level, cycleWeeks);
-  day.exercises.push({ exercise: first.name, category, sets, reps, weekReps: Array(cycleWeeks).fill(reps), rpe: Math.max(6, targets[0] - 1), weekSets: buildWeekSets(sets, 3, cycleWeeks), weekRpes: targets.map((value, index) => index % 4 === 3 ? 6 : Math.max(6, value - 1)), weekWeights: Array(cycleWeeks).fill(''), actualWeights: Array(cycleWeeks).fill(''), actualRpes: Array(cycleWeeks).fill(''), note: '', done: false, isMain: false, lift: null });
-  markWeekEdited(plan); save(); renderDayExerciseRows(); renderPlanEditor();
+  day.exercises.push({ exercise: first.name, category, sets, reps, weekReps: Array(cycleWeeks).fill(reps), rpe: Math.max(6, targets[0] - 1), weekSets: buildWeekSets(sets, 3, cycleWeeks), weekRpes: targets.map((value, index) => index % 4 === 3 ? 6 : Math.max(6, value - 1)), weekWeights: Array(cycleWeeks).fill(''), weekWeightOverrides: Array(cycleWeeks).fill(false), actualWeights: Array(cycleWeeks).fill(''), actualRpes: Array(cycleWeeks).fill(''), note: '', done: false, isMain: false, lift: null });
+  markWeekEdited(plan, editingPlanWeek); save(); renderDayExerciseRows(); renderPlanEditor();
 }
 function saveDayMetadata() {
-  const day = selectedPlan().days[editingDayIndex]; day.name = $('#dayNameInput').value.trim() || `Tag ${String(editingDayIndex + 1).padStart(2, '0')}`; day.weekDay = Number($('#dayWeekday').value); markWeekEdited();
-  $('#dayEditorTitle').textContent = day.name; save(); renderPlanEditor();
+  const plan = selectedPlan(); const day = plan.days[editingDayIndex]; day.name = $('#dayNameInput').value.trim() || `Tag ${String(editingDayIndex + 1).padStart(2, '0')}`; day.weekDay = Number($('#dayWeekday').value); markWeekEdited(plan, editingPlanWeek);
+  $('#dayEditorTitle').textContent = `W${editingPlanWeek} · ${day.name}`; save(); renderPlanEditor();
 }
 async function deletePlanById(planId) {
   const profile=user(),plan=profile.plans?.find(item=>String(item.id)===String(planId));if(!plan)return;
@@ -473,10 +625,70 @@ async function deletePlanById(planId) {
   if(String(profile.activePlanId)===String(plan.id))profile.activePlanId=profile.plans[0]?.id||null;
   editingPlanId=null;await save();renderPlanManager();show('planManagerView');
 }
-function deletePlan() { const plan=selectedPlan();if(plan)deletePlanById(plan.id); }
+async function sharePlan() {
+  const plan = selectedPlan();
+  if (!plan || !window.mmgFirebase?.configured || !state.current) { alert('Zum Teilen musst du angemeldet sein.'); return; }
+  const shareId = globalThis.crypto?.randomUUID?.();
+  if (!shareId) { alert('Dieser Browser kann keinen sicheren Freigabelink erstellen.'); return; }
+  plan.authorName ||= user().displayName || 'Athlet';
+  plan.createdAt ||= new Date().toISOString();
+  const sharedPlan = JSON.parse(JSON.stringify(plan));
+  sharedPlan.currentWeek = 1; sharedPlan.nextDayIndex = 0;
+  sharedPlan.days.forEach(day => day.exercises?.forEach(exercise => {
+    exercise.actualWeights = Array(plan.cycleWeeks || 1).fill('');
+    exercise.actualRpes = Array(plan.cycleWeeks || 1).fill('');
+    exercise.done = false;
+  }));
+  try {
+    await save();
+    await window.mmgFirebase.createSharedPlan(shareId, { plan: sharedPlan, authorName: sharedPlan.authorName, createdAt: sharedPlan.createdAt });
+    const url = new URL(location.href); url.search = ''; url.searchParams.set('share', shareId); url.hash = '';
+    if (navigator.share) await navigator.share({ title: `Trainingsplan: ${plan.name}`, text: `Trainingsplan von ${sharedPlan.authorName}`, url: url.href });
+    else if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(url.href); alert('Freigabelink wurde in die Zwischenablage kopiert.'); }
+    else prompt('Diesen Link kannst du teilen:', url.href);
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    console.error('Plan sharing failed', error);
+    alert(`Der Plan konnte nicht geteilt werden${error.code ? ` (${error.code})` : ''}. Prüfe, ob die Firestore-Regeln für sharedPlans bereitgestellt wurden.`);
+  }
+}
+function clearShareQuery() {
+  const url = new URL(location.href); url.searchParams.delete('share');
+  history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
+async function importPendingSharedPlan() {
+  if (!pendingShareId || !state.current || !window.mmgFirebase?.loadSharedPlan) return;
+  try {
+    const shared = await window.mmgFirebase.loadSharedPlan(pendingShareId);
+    if (!shared?.plan || !Array.isArray(shared.plan.days) || !shared.plan.days.length) throw new Error('Der Freigabelink enthält keinen gültigen Trainingsplan.');
+    const profile = user();
+    if ((profile.plans || []).some(plan => plan.sharedSourceId === pendingShareId)) {
+      clearShareQuery(); alert('Dieser Trainingsplan ist bereits in deinen Plänen vorhanden.'); renderPlanManager(); show('planManagerView'); return;
+    }
+    const imported = JSON.parse(JSON.stringify(shared.plan));
+    imported.id = globalThis.crypto?.randomUUID?.() || `plan-${Date.now()}`;
+    imported.sharedSourceId = pendingShareId;
+    imported.authorName = shared.authorName || imported.authorName || 'Unbekannt';
+    imported.createdAt = shared.createdAt || imported.createdAt || new Date().toISOString();
+    imported.currentWeek = 1; imported.nextDayIndex = 0;
+    imported.days.forEach(day => day.exercises?.forEach(exercise => {
+      exercise.actualWeights = Array(imported.cycleWeeks || 1).fill('');
+      exercise.actualRpes = Array(imported.cycleWeeks || 1).fill('');
+      exercise.done = false;
+    }));
+    upgradePlan(imported, profile.plans.length);
+    profile.plans.unshift(imported); profile.activePlanId = imported.id;
+    await save(); clearShareQuery(); renderPlanManager(); show('planManagerView');
+    alert(`„${imported.name}“ von ${imported.authorName} wurde deinen Plänen hinzugefügt.`);
+  } catch (error) {
+    console.error('Shared plan import failed', error);
+    alert(`Der Trainingsplan konnte nicht geladen werden${error.code ? ` (${error.code})` : ''}. Prüfe den Link und die Firestore-Regeln.`);
+    clearShareQuery();
+  }
+}
 function updateOneRmPreview() {
   const data = new FormData($('#planForm'));
-  const rows = ['squat','bench','deadlift'].map(lift => { const value = data.get(`${lift}Triple`),weight=parseKg(value); return value && weight > 0 ? `${liftName(lift)} ${value} kg → ${estimateOneRmFrom3x3(weight)} kg` : null; }).filter(Boolean);
+  const rows = ['squat','bench'].map(lift => { const value = data.get(`${lift}Triple`),weight=parseKg(value); return value && weight > 0 ? `${liftName(lift)} ${value} kg → ${estimateOneRmFrom3x3(weight)} kg` : null; }).filter(Boolean);
   $('#oneRmPreview').textContent = rows.length ? `Geschätztes 1RM (RPE-8-Annahme): ${rows.join(' · ')}` : 'Geschätztes 1RM wird hier angezeigt. Letzter Satz ungefähr RPE 8.';
 }
 function updateTemplatePreview() {
@@ -500,9 +712,10 @@ async function createPlan(event) {
     deadlift: { main: ['Wettkampfkreuzheben', 'deadliftMain'], variation: ['Pause Kreuzheben', 'deadliftVar'], accessories: ['back', 'hamstrings', 'core', 'quads'] }
   };
   const weekRpes = phaseRpeTargets(phase, level, cycleWeeks);
-  const slotsByLift = Object.fromEntries(['squat','bench','deadlift'].map(lift => [lift, []]));
+  const weekTypes = Array.from({ length: cycleWeeks }, (_, index) => (index + 1) % 4 === 0 ? 'deload' : 'regular');
+  const slotsByLift = Object.fromEntries(['squat','bench'].map(lift => [lift, []]));
   schedule.forEach((slots, dayIndex) => slots.forEach((slot, slotIndex) => slotsByLift[slot.lift].push({ ...slot, dayIndex, slotIndex })));
-  const mainSetTargets = Object.fromEntries(['squat','bench','deadlift'].map(lift => [lift, weeklyMainSetTarget(phase, level, lift, focus)]));
+  const mainSetTargets = Object.fromEntries(['squat','bench'].map(lift => [lift, weeklyMainSetTarget(phase, level, lift, focus)]));
   const setAllocation = {};
   Object.entries(slotsByLift).forEach(([lift, slots]) => {
     const maximum = phase === 'hypertrophy' ? 6 : 5;
@@ -520,8 +733,14 @@ async function createPlan(event) {
       const reps = phase === 'hypertrophy' ? (slot.variation ? 8 : level === 'advanced' ? 5 : 6) : (slot.variation ? 5 : level === 'advanced' ? 3 : 4);
       const prescribedRpes = weekRpes.map(value => Math.max(6, value - (slot.variation ? .5 : 0)));
       const weekSets = buildWeekSets(sets, phase === 'hypertrophy' ? 6 : 5, cycleWeeks);
-      const weekWeights = prescribedRpes.map(rpe => calcLoad(maxes[slot.lift], reps, rpe, slot.variation ? .9 : 1));
-      return { exercise: exerciseName, category, sets, reps, weekReps: Array(cycleWeeks).fill(reps), rpe: prescribedRpes[0], weekSets, weekRpes: prescribedRpes, weight: weekWeights[0], weekWeights, actualWeights: Array(cycleWeeks).fill(''), actualRpes: Array(cycleWeeks).fill(''), note: '', done: false, isMain: true, lift: slot.lift };
+      const startingWeight = calcLoad(maxes[slot.lift], reps, prescribedRpes[0], slot.variation ? .9 : 1);
+      const step = { squat: 2.5, bench: 1.25, deadlift: 2.5 }[slot.lift];
+      const weekWeights = prescribedRpes.map((rpe, index) => {
+        if (slot.variation) return calcLoad(maxes[slot.lift], reps, rpe, .9);
+        const previousProgression = Number(startingWeight) + step * (weekTypes[index] === 'deload' ? index - 1 : index);
+        return roundKg(weekTypes[index] === 'deload' ? previousProgression * .9 : previousProgression);
+      });
+      return { exercise: exerciseName, category, sets, reps, weekReps: Array(cycleWeeks).fill(reps), rpe: prescribedRpes[0], weekSets, weekRpes: prescribedRpes, weight: weekWeights[0], weekWeights, weekWeightOverrides: Array(cycleWeeks).fill(false), actualWeights: Array(cycleWeeks).fill(''), actualRpes: Array(cycleWeeks).fill(''), note: '', done: false, isMain: true, lift: slot.lift };
     });
     const accessoryCategoriesPerDay = slots.length > 1 ? 3 : 4;
     const availableCategories = [...new Set(slots.flatMap(slot => liftMeta[slot.lift].accessories))];
@@ -546,7 +765,7 @@ async function createPlan(event) {
   });
   const actualWeeklyTargets = Object.fromEntries(Object.entries(slotsByLift).map(([lift, slots]) => [lift, setAllocation[lift].reduce((sum, value) => sum + value, 0)]));
   const templateId = `${frequency}d-${focus}-${phase}-${level}-v1`;
-  const plan = { id: globalThis.crypto?.randomUUID?.() || `plan-${Date.now()}`, templateId, templateName: `${frequency} Tage · ${liftName(focus)}-Spezialisierung · ${phaseName(phase)} · ${levelName(level)}`, name: String(form.get('planName')).trim(), level, frequency, startDay, focus, phase, triples, maxes, setCaps: actualWeeklyTargets, weeklySetTargets: actualWeeklyTargets, currentWeek: 1, cycleWeeks, editedWeeks: [], days };
+  const plan = { id: globalThis.crypto?.randomUUID?.() || `plan-${Date.now()}`, templateId, templateName: `${frequency} Tage · ${liftName(focus)}-Spezialisierung · ${phaseName(phase)} · ${levelName(level)}`, name: String(form.get('planName')).trim(), authorName: user().displayName || 'Athlet', createdAt: new Date().toISOString(), level, frequency, startDay, focus, phase, triples, maxes, weeklyProgression: { squat: 2.5, bench: 1.25, deadlift: 2.5 }, weekTypes, setCaps: actualWeeklyTargets, weeklySetTargets: actualWeeklyTargets, currentWeek: 1, cycleWeeks, editedWeeks: [], days };
   const profile = user(); profile.plans ||= []; profile.plans.unshift(plan); profile.activePlanId = plan.id; editingPlanId = plan.id;
   await save(); renderDashboard();
 }
@@ -607,7 +826,7 @@ function finishWorkout() {
     const planned = exercise.weekWeights?.[week - 1] || '';
     const plannedRpe = exercise.weekRpes?.[week - 1] || exercise.rpe || cycleRpe(week);
     const reps = exercise.weekReps?.[week - 1] || exercise.reps;
-    return { exercise: exercise.exercise, category: exercise.category, lift: exercise.lift || null, reps, plannedRpe, actualRpe: exercise.actualRpes?.[week - 1] || plannedRpe, planned, actual: exercise.actualWeights?.[week - 1] || planned };
+    return { exercise: exercise.exercise, category: exercise.category, lift: exercise.lift || null, reps, plannedRpe, actualRpe: exercise.actualRpes?.[week - 1] || plannedRpe, planned, actual: exercise.actualWeights?.[week - 1] || planned, note: exercise.note || '' };
   }) });
   day.exercises.forEach(exercise => { exercise.done = false; });
   plan.nextDayIndex = dayIndex + 1;
@@ -622,8 +841,8 @@ function finishWorkout() {
 }
 function renderCatalog() {
   const query = $('#exerciseSearch').value.toLowerCase(); const group = $('#muscleFilter').value;
-  const list = getExerciseCatalog().filter(exercise => (!group || exercise.group === group) && (!query || exercise.name.toLowerCase().includes(query) || exercise.group.toLowerCase().includes(query) || exercise.muscle.toLowerCase().includes(query)));
-  $('#catalog').innerHTML = list.map(exercise => `<article class="catalog-item"><div><strong>${esc(exercise.name)}</strong><span>${esc(CAT_LABEL[categoryForExercise(exercise.name)] || 'Assistenz')} · ${esc(exercise.group)} · ${esc(exercise.muscle)}</span></div><div class="catalog-actions"><button type="button" class="button ghost" data-edit-catalog="${esc(exercise.id)}" aria-label="${esc(exercise.name)} bearbeiten" title="Bearbeiten">✎</button><button type="button" class="icon-button trash-button" data-delete-catalog="${esc(exercise.id)}" aria-label="${esc(exercise.name)} löschen" title="Löschen">${TRASH_ICON}</button></div></article>`).join('') || '<p class="empty">Keine Übung gefunden.</p>';
+  const list = getExerciseCatalog().filter(exercise => (!group || exercise.group === group) && (!query || exercise.name.toLowerCase().includes(query) || exercise.group.toLowerCase().includes(query)));
+  $('#catalog').innerHTML = list.map(exercise => `<article class="catalog-item"><div><strong>${esc(exercise.name)}</strong><span>${esc(CAT_LABEL[categoryForExercise(exercise.name)] || 'Assistenz')} · ${esc(exercise.group)}</span></div><div class="catalog-actions"><button type="button" class="button ghost" data-edit-catalog="${esc(exercise.id)}" aria-label="${esc(exercise.name)} bearbeiten" title="Bearbeiten">✎</button><button type="button" class="icon-button trash-button" data-delete-catalog="${esc(exercise.id)}" aria-label="${esc(exercise.name)} löschen" title="Löschen">${TRASH_ICON}</button></div></article>`).join('') || '<p class="empty">Keine Übung gefunden.</p>';
   $$('[data-edit-catalog]').forEach(button => button.onclick = () => openCatalogEditor(button.dataset.editCatalog));
   $$('[data-delete-catalog]').forEach(button => button.onclick = () => deleteCatalogExercise(button.dataset.deleteCatalog));
 }
@@ -639,13 +858,9 @@ function openCatalogEditor(id = '') {
   form.elements.name.value = exercise?.name || '';
   const catalog = getExerciseCatalog();
   const groups = [...new Set(catalog.map(item => item.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
-  const muscles = [...new Set(catalog.map(item => item.muscle).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
   if (exercise?.group && !groups.includes(exercise.group)) groups.push(exercise.group);
-  if (exercise?.muscle && !muscles.includes(exercise.muscle)) muscles.push(exercise.muscle);
   form.elements.group.innerHTML = groups.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('');
-  form.elements.muscle.innerHTML = muscles.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join('');
   form.elements.group.value = exercise?.group || groups[0] || '';
-  form.elements.muscle.value = exercise?.muscle || muscles[0] || '';
   form.elements.category.innerHTML = TRAINING_CATS.map(([key, label]) => `<option value="${key}" ${key === (exercise ? categoryForExercise(exercise.name) : 'back') ? 'selected' : ''}>${esc(label)}</option>`).join('');
   $('#catalogEditorTitle').textContent = exercise ? 'Übung bearbeiten' : 'Übung hinzufügen';
   $('#catalogEditorModal').classList.remove('hidden'); form.elements.name.focus();
@@ -661,7 +876,7 @@ function saveCatalogExercise(event) {
   const id = String(values.get('id') || globalThis.crypto?.randomUUID?.() || `exercise-${Date.now()}`);
   const name = String(values.get('name') || '').trim();
   if (catalog.some(item => item.id !== id && item.name.toLowerCase() === name.toLowerCase())) { alert('Eine Übung mit diesem Namen ist bereits vorhanden.'); return; }
-  const exercise = { id, name, category: String(values.get('category')), group: String(values.get('group')).trim(), muscle: String(values.get('muscle')).trim() };
+  const exercise = { id, name, category: String(values.get('category')), group: String(values.get('group')).trim() };
   const index = catalog.findIndex(item => item.id === id);
   if (index >= 0) catalog[index] = exercise; else catalog.push(exercise);
   user().exerciseCatalog = catalog; save(); $('#catalogEditorModal').classList.add('hidden'); openCatalog();
@@ -704,7 +919,7 @@ async function handleFirebaseUser(firebaseUser) {
     try {
       const payload = await window.mmgFirebase.loadData(uid);
       if (state.current !== uid) return;
-      state.users = { [uid]: buildProfile(firebaseUser, payload || {}, fallback) }; cacheState(); $('#syncStatus').textContent = 'SYNCED'; renderDashboard();
+      state.users = { [uid]: buildProfile(firebaseUser, payload || {}, fallback) }; cacheState(); $('#syncStatus').textContent = 'SYNCED'; renderDashboard(); await importPendingSharedPlan();
     } catch (error) {
       console.error('Loading Firestore profile failed', error);
       if (state.current === uid) $('#syncStatus').textContent = 'OFFLINE';
@@ -714,11 +929,11 @@ async function handleFirebaseUser(firebaseUser) {
   finally { if (authLoadUid === uid) { authLoadUid = null; authLoadPromise = null; } }
 }
 $('#googleSignIn').onclick = signIn;
-$('#logout').onclick = async () => { try { await window.mmgFirebase?.signOut(); } finally { state.current = null; state.users = {}; cacheState(); show('authView'); } };
+async function logout() { try { await window.mmgFirebase?.signOut(); } finally { state.current = null; state.users = {}; cacheState(); show('authView'); } }
 $('#newPlanCircle').onclick = () => {
   $('#planForm').reset();$('#planMessage').textContent='';
   const defaults=user()?.triples || {};
-  ['squat','bench','deadlift'].forEach(lift=>{const input=$(`#planForm [name="${lift}Triple"]`);input.value=String(defaults[lift]||activePlan()?.triples?.[lift]||'').replace('.',',');});
+  ['squat','bench'].forEach(lift=>{const input=$(`#planForm [name="${lift}Triple"]`);input.value=String(defaults[lift]||activePlan()?.triples?.[lift]||'').replace('.',',');});
   updateOneRmPreview();updateTemplatePreview();show('planView');
 };
 $('#planForm').onsubmit = async event => {
@@ -734,7 +949,9 @@ $$('[data-generator-weight]').forEach(input=>input.onclick=()=>openWeightKeypad(
 updateTemplatePreview();
 $$('[data-back]').forEach(button => button.onclick = () => goBack(button.dataset.back));
 $('#editorPlanName').onchange = () => { const plan = selectedPlan(); plan.name = $('#editorPlanName').value.trim() || plan.name; save(); renderPlanEditor(); };
-$('#deletePlan').onclick = deletePlan;
+$('#deletePlanWeek').onclick = deletePlanWeek;
+$('#sharePlanButton').onclick = sharePlan;
+$('#editorWeekSelect').onchange = event => { editingPlanWeek = Number(event.target.value); renderPlanEditor(); };
 $('#dayNameInput').onchange = saveDayMetadata; $('#dayWeekday').onchange = saveDayMetadata; $('#addExercise').onclick = addExerciseToDay;
 $('#finishWorkout').onclick = () => openSatisfaction(activeDay);
 $('#confirmWorkout').onclick = finishWorkout;
@@ -767,8 +984,11 @@ $$('[data-page]').forEach(button => button.onclick = () => {
 $$('[data-key]').forEach(button=>button.onclick=()=>updateKeypad(button.dataset.key));
 $$('[data-weight-step]').forEach(button=>button.onclick=()=>stepKeypad(button.dataset.weightStep));
 $('#keypadConfirm').onclick=confirmKeypad;
-$('#keypadCancel').onclick=()=>{$('#numericKeypad').classList.add('hidden');keypadTarget=null;keypadOnConfirm=null;};
-$('#settingsLogout').onclick = () => $('#logout').click();
+$('#keypadCancel').onclick=()=>{$('#numericKeypad').classList.add('hidden');keypadTarget=null;keypadOnConfirm=null;keypadAllowZero=false;};
+$('#saveHistoryEdit').onclick = saveHistoryEdit;
+$('#cancelHistoryEdit').onclick = () => { $('#historyEditorModal').classList.add('hidden'); editingHistoryIndex = -1; };
+$('#historyEditorModal').onclick = event => { if (event.target === $('#historyEditorModal')) { $('#historyEditorModal').classList.add('hidden'); editingHistoryIndex = -1; } };
+$('#settingsLogout').onclick = logout;
 document.addEventListener('mmg-firebase-ready', () => {
   if (!window.mmgFirebase?.configured) { $('#authMessage').textContent = 'Firebase einrichten: config.js, Google-Anbieter und Firestore-Regeln.'; return; }
   window.mmgFirebase.watchAuth(handleFirebaseUser);
