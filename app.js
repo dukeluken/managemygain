@@ -642,11 +642,21 @@ async function sharePlan() {
   plan.authorName ||= user().displayName || 'Athlet';
   plan.createdAt ||= new Date().toISOString();
   const sharedPlan = JSON.parse(JSON.stringify(plan));
+  // Bestleistungen und daraus abgeleitete Maxes sind persönliche Daten und
+  // gehören nicht in die geteilte Vorlage.
+  sharedPlan.triples = {};
+  sharedPlan.maxes = {};
   sharedPlan.currentWeek = 1; sharedPlan.nextDayIndex = 0;
   sharedPlan.days.forEach(day => day.exercises?.forEach(exercise => {
     exercise.actualWeights = Array(plan.cycleWeeks || 1).fill('');
     exercise.actualRpes = Array(plan.cycleWeeks || 1).fill('');
     exercise.done = false;
+    const lift = exercise.lift || catLift(exercise.category);
+    if (lift && (exercise.category === `${lift}Main` || exercise.category === `${lift}Var`)) {
+      exercise.weekWeights = Array(plan.cycleWeeks || 1).fill('');
+      exercise.weekWeightOverrides = Array(plan.cycleWeeks || 1).fill(false);
+      exercise.weight = '';
+    }
   }));
   try {
     await save();
@@ -665,14 +675,57 @@ function clearShareQuery() {
   const url = new URL(location.href); url.searchParams.delete('share');
   history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
 }
+function adaptImportedPlanToLifter(plan, personalTriples = {}) {
+  const lifts = ['squat','bench','deadlift'];
+  const triples = Object.fromEntries(lifts.map(lift => {
+    const value = parseKg(personalTriples[lift]);
+    return [lift, Number.isFinite(value) && value > 0 ? value : ''];
+  }));
+  const maxes = Object.fromEntries(lifts.map(lift => [lift, triples[lift] ? estimateOneRmFrom3x3(triples[lift]) : '']));
+  plan.triples = triples;
+  plan.maxes = maxes;
+  const weeks = Number(plan.cycleWeeks) || 1;
+  plan.days.forEach(day => day.exercises?.forEach(exercise => {
+    const lift = exercise.lift || catLift(exercise.category);
+    if (!lift || !['squat','bench','deadlift'].includes(lift)) return;
+    const isMain = exercise.category === `${lift}Main`;
+    const isVariation = exercise.category === `${lift}Var`;
+    if (!isMain && !isVariation) return;
+    const max = Number(maxes[lift]);
+    const reps = exercise.weekReps?.[0] || exercise.reps || 1;
+    const firstRpe = Number(exercise.weekRpes?.[0] || exercise.rpe || 7);
+    const firstLoad = max > 0 ? calcLoad(max, reps, firstRpe, isVariation ? .9 : 1) : '';
+    const progression = Math.max(0, parseKg(plan.weeklyProgression?.[lift]) || 0);
+    exercise.weekWeights = Array.from({ length: weeks }, (_, weekIndex) => {
+      if (!firstLoad) return '';
+      const weekRpe = Number(exercise.weekRpes?.[weekIndex] || firstRpe);
+      if (isVariation) return calcLoad(max, exercise.weekReps?.[weekIndex] || reps, weekRpe, .9);
+      const priorProgressionWeek = Math.max(0, weekIndex - 1);
+      const baseAndProgression = Number(firstLoad) + progression * (plan.weekTypes?.[weekIndex] === 'deload' ? priorProgressionWeek : weekIndex);
+      return roundKg(plan.weekTypes?.[weekIndex] === 'deload' ? baseAndProgression * .9 : baseAndProgression);
+    });
+    exercise.weekWeightOverrides = Array(weeks).fill(false);
+    exercise.weight = exercise.weekWeights[0] || '';
+  }));
+  return lifts.filter(lift => !triples[lift]);
+}
 async function importPendingSharedPlan() {
   if (!pendingShareId || !state.current || !window.mmgFirebase?.loadSharedPlan) return;
   try {
     const shared = await window.mmgFirebase.loadSharedPlan(pendingShareId);
     if (!shared?.plan || !Array.isArray(shared.plan.days) || !shared.plan.days.length) throw new Error('Der Freigabelink enthält keinen gültigen Trainingsplan.');
     const profile = user();
-    if ((profile.plans || []).some(plan => plan.sharedSourceId === pendingShareId)) {
-      clearShareQuery(); alert('Dieser Trainingsplan ist bereits in deinen Plänen vorhanden.'); renderPlanManager(); show('planManagerView'); return;
+    const existingSharedPlan = (profile.plans || []).find(plan => plan.sharedSourceId === pendingShareId);
+    if (existingSharedPlan) {
+      const settingsDiffer = ['squat','bench','deadlift'].some(lift => parseKg(existingSharedPlan.triples?.[lift]) !== parseKg(profile.triples?.[lift]));
+      if (settingsDiffer) {
+        adaptImportedPlanToLifter(existingSharedPlan, profile.triples || {});
+        await save();
+        clearShareQuery(); alert('Der bereits hinzugefügte Plan wurde an deine persönlichen 3×3-Werte angepasst.');
+      } else {
+        clearShareQuery(); alert('Dieser Trainingsplan ist bereits in deinen Plänen vorhanden.');
+      }
+      renderPlanManager(); show('planManagerView'); return;
     }
     const imported = JSON.parse(JSON.stringify(shared.plan));
     imported.id = globalThis.crypto?.randomUUID?.() || `plan-${Date.now()}`;
@@ -686,9 +739,11 @@ async function importPendingSharedPlan() {
       exercise.done = false;
     }));
     upgradePlan(imported, profile.plans.length);
+    const missingLifts = adaptImportedPlanToLifter(imported, profile.triples || {});
     profile.plans.unshift(imported); profile.activePlanId = imported.id;
     await save(); clearShareQuery(); renderPlanManager(); show('planManagerView');
-    alert(`„${imported.name}“ von ${imported.authorName} wurde deinen Plänen hinzugefügt.`);
+    const missingNotice = missingLifts.length ? ` Für ${missingLifts.map(liftName).join(', ')} fehlen eigene 3×3-Werte; diese Gewichte bleiben leer, bis du sie in den Einstellungen einträgst.` : '';
+    alert(`„${imported.name}“ von ${imported.authorName} wurde deinen Plänen mit deinen persönlichen Kraftwerten hinzugefügt.${missingNotice}`);
   } catch (error) {
     console.error('Shared plan import failed', error);
     alert(`Der Trainingsplan konnte nicht geladen werden${error.code ? ` (${error.code})` : ''}. Prüfe den Link und die Firestore-Regeln.`);
