@@ -16,6 +16,7 @@
 	} from '#lib/engine/index.ts';
 	import ExercisePicker from './ExercisePicker.svelte';
 	import Icon from './Icon.svelte';
+	import Keypad from './Keypad.svelte';
 	import Sheet from './Sheet.svelte';
 	import { untrack } from 'svelte';
 
@@ -47,6 +48,32 @@
 	let auto = $state(isLift && !overridden);
 	let weightText = $state(p.weight != null ? kg(p.weight) : '');
 	let confirmDelete = $state(false);
+	let keypadOpen = $state(false);
+
+	const weightValue = $derived.by(() => {
+		const n = Number(weightText.replace(',', '.'));
+		return weightText.trim() && Number.isFinite(n) ? n : null;
+	});
+
+	/** Wiederholungen ±1. Bei Spannen wie „8–12“ verschieben sich beide Grenzen. */
+	function stepReps(delta: number) {
+		const text = reps.trim();
+		const range = text.match(/^(\d+)\s*[–-]\s*(\d+)$/);
+		if (range) {
+			const lo = Number(range[1]);
+			const hi = Number(range[2]);
+			if (lo + delta < 1) return;
+			reps = `${lo + delta}–${hi + delta}`;
+		} else if (/^\d+$/.test(text)) {
+			reps = String(Math.max(1, Math.min(50, Number(text) + delta)));
+		}
+	}
+
+	function confirmWeight(value: number | null) {
+		weightText = value != null ? kg(value) : '';
+		if (isLift) auto = false;
+		keypadOpen = false;
+	}
 
 	const catalog = $derived(exerciseCatalog(session.plan?.goal ?? 'strength'));
 	const group = $derived(catalog.find((c) => c.name === ex.exercise)?.group ?? null);
@@ -108,28 +135,33 @@
 					<button onclick={() => (sets = Math.min(20, sets + 1))} aria-label="Ein Satz mehr"><Icon name="plus" size={18} /></button>
 				</div>
 			</div>
-			<label class="field">
+			<div class="field">
 				<span>Wiederholungen</span>
-				<input id="edit-reps" class="display num" bind:value={reps} inputmode="text" maxlength="12" autocomplete="off" />
-			</label>
+				<div class="stepper">
+					<button onclick={() => stepReps(-1)} aria-label="Eine Wiederholung weniger"><Icon name="minus" size={18} /></button>
+					<input
+						id="edit-reps"
+						class="display num reps"
+						bind:value={reps}
+						inputmode="text"
+						maxlength="12"
+						autocomplete="off"
+						aria-label="Wiederholungen"
+					/>
+					<button onclick={() => stepReps(1)} aria-label="Eine Wiederholung mehr"><Icon name="plus" size={18} /></button>
+				</div>
+			</div>
 			<div class="field col">
 				<div class="row">
 					<span>Gewicht</span>
-					{#if isLift && auto}
-						<span class="auto num">{p.weight != null && !overridden ? `${kg(p.weight)} kg` : 'wird berechnet'}</span>
-					{:else}
-						<span class="wrap">
-							<input
-								id="edit-weight"
-								class="display num"
-								bind:value={weightText}
-								inputmode="decimal"
-								placeholder="–"
-								autocomplete="off"
-							/>
-							<small>kg</small>
-						</span>
-					{/if}
+					<button class="weight" class:auto={isLift && auto} onclick={() => (keypadOpen = true)} aria-label="Gewicht eingeben">
+						{#if isLift && auto}
+							<span class="num">{p.weight != null && !overridden ? kg(p.weight) : '–'}</span>
+						{:else}
+							<span class="display num">{weightValue != null ? kg(weightValue) : '–'}</span>
+						{/if}
+						<small>kg</small>
+					</button>
 				</div>
 				{#if isLift}
 					<label class="check">
@@ -169,6 +201,16 @@
 		<p class="muted note">Tauschen, Verschieben und Entfernen gelten für diesen Tag im ganzen Plan.</p>
 	{/if}
 </Sheet>
+
+{#if keypadOpen}
+	<Keypad
+		title="{ex.exercise} · Woche {week + 1}{scope === 'rest' && week + 1 < weeks ? ` bis ${weeks}` : ''}"
+		value={weightValue ?? (isLift ? p.weight : null)}
+		allowClear={!isLift}
+		onconfirm={confirmWeight}
+		oncancel={() => (keypadOpen = false)}
+	/>
+{/if}
 
 <style>
 	.note {
@@ -230,7 +272,7 @@
 	}
 	.stepper b {
 		font-size: 34px;
-		min-width: 1.6ch;
+		width: 3.6ch;
 		text-align: center;
 	}
 	.stepper button {
@@ -240,6 +282,32 @@
 		display: grid;
 		place-items: center;
 		background: var(--sf2);
+	}
+	.weight {
+		display: flex;
+		align-items: baseline;
+		gap: 6px;
+		padding: 4px 12px;
+		border-radius: 12px;
+		background: var(--sf2);
+	}
+	.weight .display {
+		font-size: 34px;
+		color: var(--ac-ink);
+	}
+	.weight.auto span {
+		font-size: 17px;
+		font-weight: 600;
+		color: var(--mu);
+	}
+	.weight small {
+		color: var(--mu);
+	}
+	input.reps {
+		width: 3.6ch;
+		text-align: center !important;
+		font-size: 28px !important;
+		color: var(--tx) !important;
 	}
 	input.display {
 		width: 5.5ch;
@@ -255,13 +323,7 @@
 		text-decoration: underline 2px var(--ac);
 		text-underline-offset: 6px;
 	}
-	.wrap {
-		display: flex;
-		align-items: baseline;
-		gap: 6px;
-	}
-	.wrap small,
-	.auto {
+		.auto {
 		color: var(--mu);
 	}
 	.auto {
