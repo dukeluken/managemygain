@@ -13,6 +13,7 @@ import {
   doc,
   getDoc,
   setDoc,
+  runTransaction,
   serverTimestamp
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 
@@ -50,16 +51,32 @@ if (!isConfigured) {
         const snapshot = await getDoc(doc(db, 'users', uid));
         return snapshot.exists() ? snapshot.data() : null;
       },
-      saveData: (uid, data) => setDoc(doc(db, 'users', uid), {
-        plans: data.plans ?? [],
-        activePlanId: data.activePlanId ?? null,
-        plan: data.plan ?? null,
-        history: data.history ?? [],
-        triples: data.triples ?? {},
-        bodyWeight: data.bodyWeight ?? '',
-        exerciseCatalog: data.exerciseCatalog ?? [],
-        updatedAt: serverTimestamp()
-      }, { merge: true }),
+      // Schreibt nur, wenn die Cloud noch auf der erwarteten Revision steht.
+      // Sonst wurde zwischenzeitlich auf einem anderen Gerät gespeichert
+      // (Fehlercode mmg/conflict). Liefert die neue Revision zurück.
+      saveData: (uid, data, expectedRevision) => runTransaction(db, async transaction => {
+        const ref = doc(db, 'users', uid);
+        const snapshot = await transaction.get(ref);
+        const currentRevision = snapshot.exists() ? Number(snapshot.data().revision) || 0 : 0;
+        if (currentRevision !== Number(expectedRevision || 0)) {
+          const conflict = new Error('Die Cloud-Daten wurden auf einem anderen Gerät geändert.');
+          conflict.code = 'mmg/conflict';
+          throw conflict;
+        }
+        const revision = currentRevision + 1;
+        transaction.set(ref, {
+          plans: data.plans ?? [],
+          activePlanId: data.activePlanId ?? null,
+          plan: data.plan ?? null,
+          history: data.history ?? [],
+          triples: data.triples ?? {},
+          bodyWeight: data.bodyWeight ?? '',
+          exerciseCatalog: data.exerciseCatalog ?? [],
+          revision,
+          updatedAt: serverTimestamp()
+        });
+        return revision;
+      }),
       createSharedPlan: (shareId, data) => setDoc(doc(db, 'sharedPlans', shareId), {
         plan: data.plan,
         authorName: data.authorName,

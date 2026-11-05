@@ -34,6 +34,10 @@ Die frühere Apps-Script-Web-App wird von dieser Version nicht mehr benutzt. Fal
 
 Öffne `index.html` über VS Code Live Server. Für Google-Login muss `config.js` eine Firebase-Konfiguration enthalten und der lokale Host bei Firebase als autorisierte Domain eingetragen sein. Firestore-Regeln lokal testen kannst du mit der Firebase Local Emulator Suite.
 
+Die reine Programmlogik (Plan-Generator, Bereinigung importierter Pläne, Historien-Zuordnung) liegt in `logic.js` und wird mit `npm test` (Node 18+) geprüft.
+
+**Synchronisierung:** Jede Speicherung erhöht im Firestore-Dokument das Feld `revision`. Hat ein anderes Gerät zwischenzeitlich gespeichert, fragt die App, welcher Stand gelten soll, statt still zu überschreiben. Solange die Cloud-Daten nicht geladen werden konnten (offline), speichert die App nur lokal und synchronisiert, sobald die Verbindung wieder steht. Client und Regeln gehören zusammen: nach Änderungen immer `firebase deploy --only hosting,firestore:rules` gemeinsam ausführen.
+
 ## Trainingsprogramm
 
 Die Vorlagen sind editierbare Startpunkte, keine individuell validierten oder offiziell „approved“ Coaching-Pläne. Die 3×3-Eingabe schätzt das 1RM mit einer einfachen Wiederholungs-/RIR-Heuristik; sie ersetzt keine gemessene Maximalleistung. Die Volumenwerte sind konservative Programmier-Leitplanken, keine universellen Optima. Details, Quellenlage und die Designentscheidungen stehen in [TRAINING_TEMPLATES_RESEARCH.md](TRAINING_TEMPLATES_RESEARCH.md).

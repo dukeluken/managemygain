@@ -6,17 +6,39 @@ service cloud.firestore {
         return request.auth != null && request.auth.uid == userId;
       }
 
+      function validProfile(data) {
+        return data.keys().hasOnly(['plan', 'plans', 'activePlanId', 'history', 'triples', 'bodyWeight', 'exerciseCatalog', 'revision', 'updatedAt'])
+          && data.plans is list
+          && data.history is list
+          && data.revision is int;
+      }
+
       allow get: if isOwner();
       allow list, delete: if false;
-      allow create, update: if isOwner()
-        && request.resource.data.keys().hasOnly(['plan', 'plans', 'activePlanId', 'history', 'triples', 'bodyWeight', 'exerciseCatalog', 'updatedAt']);
+      // Jede Speicherung erhöht die Revision um genau 1. So kann ein Gerät mit
+      // veraltetem Stand nicht unbemerkt neuere Daten eines anderen Geräts überschreiben.
+      allow create: if isOwner()
+        && validProfile(request.resource.data)
+        && request.resource.data.revision == 1;
+      allow update: if isOwner()
+        && validProfile(request.resource.data)
+        && request.resource.data.revision == resource.data.get('revision', 0) + 1;
     }
 
     match /sharedPlans/{shareId} {
       allow get: if true;
       allow list, update, delete: if false;
       allow create: if request.auth != null
-        && request.resource.data.keys().hasOnly(['plan', 'authorName', 'createdAt', 'publishedAt']);
+        && request.resource.data.keys().hasOnly(['plan', 'authorName', 'createdAt', 'publishedAt'])
+        && request.resource.data.plan is map
+        && request.resource.data.plan.days is list
+        && request.resource.data.plan.days.size() > 0
+        && request.resource.data.plan.days.size() <= 14
+        && request.resource.data.authorName is string
+        && request.resource.data.authorName == request.auth.token.get('name', 'Athlet')
+        && request.resource.data.createdAt is string
+        && request.resource.data.createdAt.size() <= 40
+        && request.resource.data.publishedAt == request.time;
     }
   }
 }
