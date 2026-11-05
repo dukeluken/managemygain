@@ -8,6 +8,7 @@
 		title,
 		value = null,
 		allowClear = false,
+		clearLabel = 'Kein Gewicht',
 		onconfirm,
 		oncancel
 	}: {
@@ -15,6 +16,7 @@
 		value?: number | null;
 		/** Zeigt „Kein Gewicht“ an (für Übungen ohne Gewichtsvorgabe). */
 		allowClear?: boolean;
+		clearLabel?: string;
 		onconfirm: (value: number | null) => void;
 		oncancel: () => void;
 	} = $props();
@@ -88,7 +90,7 @@
 
 	<div class="actions">
 		{#if allowClear}
-			<button class="ghost" onclick={() => onconfirm(null)}>Kein Gewicht</button>
+			<button class="ghost" onclick={() => onconfirm(null)}>{clearLabel}</button>
 		{/if}
 		<button class="cta" onclick={confirm} disabled={!valid}><span>Übernehmen</span></button>
 	</div>
