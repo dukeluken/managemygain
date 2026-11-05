@@ -88,6 +88,8 @@ export interface Plan {
 	request: PlanRequest | null;
 	engine: 'powerlifting-v2';
 	program: Program;
+	/** Geschätzte Bestwerte beim Erstellen, Ausgangspunkt für den Fortschritt. */
+	startMaxes?: Record<MainLift, number | null>;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -122,4 +124,6 @@ export interface Workout {
 	startedAt: string;
 	finishedAt: string | null;
 	exercises: LoggedExercise[];
+	/** Geschätzte Bestwerte nach dem Training (für den Fortschrittsverlauf). */
+	estimates?: Record<MainLift, number | null>;
 }

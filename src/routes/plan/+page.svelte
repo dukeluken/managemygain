@@ -1,16 +1,24 @@
 <script lang="ts">
 	import { session } from '#lib/data/session.svelte.ts';
 	import {
+		WEEKDAY_LONG,
 		WEEKDAY_SHORT,
+		WEEK_ORDER,
+		addExercise,
 		dayPrescription,
 		dayTitle,
+		exerciseCatalog,
 		isDeload,
 		kg,
+		moveDay,
 		weekCount,
 		weekIndexAt,
 		weekSlots
 	} from '#lib/engine/index.ts';
+	import ExerciseEditor from '#lib/ui/ExerciseEditor.svelte';
+	import ExercisePicker from '#lib/ui/ExercisePicker.svelte';
 	import Icon from '#lib/ui/Icon.svelte';
+	import Sheet from '#lib/ui/Sheet.svelte';
 
 	const today = new Date();
 	const plan = $derived(session.plan);
@@ -20,6 +28,9 @@
 	let chosen = $state<number | null>(null);
 	const week = $derived(chosen ?? current);
 	let open = $state<number | null>(null);
+	let editing = $state<{ dayIndex: number; exIndex: number } | null>(null);
+	let adding = $state<number | null>(null);
+	let movingDay = $state<number | null>(null);
 
 	const slots = $derived(plan ? weekSlots(plan, session.workouts, week, today) : []);
 	const nextDeload = $derived(
@@ -67,7 +78,6 @@
 					class:now={i === current}
 					onclick={() => {
 						chosen = i;
-						open = null;
 					}}
 				>
 					<span class="num">{i + 1}</span>
@@ -83,31 +93,94 @@
 						<span class="d">{WEEKDAY_SHORT[s.weekDay]}</span><span class="t">Ruhetag</span><span></span>
 					</div>
 				{:else}
-					{@const d = plan.program.days[s.dayIndex]}
+					{@const dayIndex = s.dayIndex}
+					{@const d = plan.program.days[dayIndex]}
 					<button
 						class="day {s.status}"
-						aria-expanded={open === s.dayIndex}
-						onclick={() => (open = open === s.dayIndex ? null : s.dayIndex)}
+						aria-expanded={open === dayIndex}
+						onclick={() => (open = open === dayIndex ? null : dayIndex)}
 					>
 						<span class="d">{WEEKDAY_SHORT[s.weekDay]}</span>
 						<span class="t">{dayTitle(d)}</span>
 						<span class="s">{STATUS[s.status]}<Icon name="chevron" size={16} /></span>
 					</button>
-					{#if open === s.dayIndex}
+					{#if open === dayIndex}
 						<div class="sub-list">
-							{#each dayPrescription(plan.program, week, s.dayIndex) as p, i (i)}
-								<div class="ex"><span>{p.exercise}</span><span class="num muted">{amount(p)}</span></div>
+							{#each dayPrescription(plan.program, week, dayIndex) as p, exIndex (exIndex)}
+								<button class="ex" onclick={() => (editing = { dayIndex, exIndex })}>
+									<span class="name">{p.exercise}</span>
+									<span class="num muted amount">{amount(p)}</span>
+									<Icon name="edit" size={16} />
+								</button>
 							{/each}
-							{#if s.status !== 'done'}
-								<a class="start" href="/training?w={week}&d={s.dayIndex}">Dieses Training starten</a>
-							{/if}
+							<div class="day-actions">
+								<button class="link" onclick={() => (adding = dayIndex)}>+ Übung</button>
+								<button class="link" onclick={() => (movingDay = dayIndex)}>Wochentag ändern</button>
+								{#if s.status !== 'done'}
+									<a class="link strong" href="/training?w={week}&d={dayIndex}">Starten</a>
+								{/if}
+							</div>
 						</div>
 					{/if}
 				{/if}
 			{/each}
 		</section>
+		<p class="muted hint">Tippe auf einen Tag und dann auf eine Übung, um sie zu ändern.</p>
 	{/if}
 </main>
+
+{#if plan && editing}
+	<ExerciseEditor
+		program={plan.program}
+		dayIndex={editing.dayIndex}
+		exIndex={editing.exIndex}
+		{week}
+		onclose={() => (editing = null)}
+	/>
+{/if}
+
+{#if plan && adding != null}
+	{@const dayIndex = adding}
+	<Sheet title="Übung hinzufügen" onclose={() => (adding = null)}>
+		<p class="muted note">
+			Wird am {WEEKDAY_LONG[plan.program.days[dayIndex].weekDay]} in allen Wochen angehängt, mit 3 Sätzen.
+		</p>
+		<ExercisePicker
+			catalog={exerciseCatalog(plan.goal)}
+			onpick={(item) => {
+				session.editPlan((prog) => addExercise(prog, dayIndex, item, week));
+				adding = null;
+			}}
+		/>
+	</Sheet>
+{/if}
+
+{#if plan && movingDay != null}
+	{@const dayIndex = movingDay}
+	{@const day = plan.program.days[dayIndex]}
+	<Sheet title="{dayTitle(day)} verschieben" onclose={() => (movingDay = null)}>
+		<p class="muted note">Gilt für alle Wochen. Liegt dort schon ein Training, tauschen beide Tage.</p>
+		<div class="weekdays">
+			{#each WEEK_ORDER as wd (wd)}
+				{@const other = plan.program.days.find((x, i) => i !== dayIndex && x.weekDay === wd)}
+				<button
+					class:sel={day.weekDay === wd}
+					onclick={() => {
+						session.editPlan((prog) => moveDay(prog, dayIndex, wd));
+						movingDay = null;
+					}}
+				>
+					<b>{WEEKDAY_SHORT[wd]}</b>
+					<small>{day.weekDay === wd ? 'jetzt' : other ? 'tauschen' : 'frei'}</small>
+				</button>
+			{/each}
+		</div>
+	</Sheet>
+{/if}
+
+{#if session.error}
+	<p class="toast" role="alert">{session.error}</p>
+{/if}
 
 <style>
 	.sub {
@@ -214,18 +287,81 @@
 		border-bottom: 1px solid var(--sf2);
 	}
 	.ex {
-		display: flex;
-		justify-content: space-between;
-		gap: 12px;
-		padding: 6px 0;
+		display: grid;
+		grid-template-columns: 1fr auto 16px;
+		align-items: center;
+		gap: 10px;
+		padding: 9px 0;
+		text-align: left;
+		color: var(--mu);
 	}
-	.ex span:last-child {
+	.ex .name {
+		color: var(--tx);
+	}
+	.amount {
 		white-space: nowrap;
 	}
-	.start {
+	.day-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px 18px;
 		margin-top: 8px;
+	}
+	.link {
 		color: var(--ac-ink);
 		font-weight: 600;
+		font-size: 14px;
 		text-decoration: none;
+		padding: 6px 0;
+	}
+	.link.strong {
+		margin-left: auto;
+	}
+	.hint {
+		margin: 0;
+		font-size: 13px;
+	}
+	.note {
+		margin: 0;
+		font-size: 13px;
+	}
+	.weekdays {
+		display: grid;
+		grid-template-columns: repeat(7, 1fr);
+		gap: 6px;
+	}
+	.weekdays button {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 2px;
+		padding: 12px 0;
+		border-radius: 14px;
+		background: var(--sf2);
+	}
+	.weekdays small {
+		font-size: 10px;
+		color: var(--mu);
+	}
+	.weekdays button.sel {
+		background: var(--ac);
+		color: var(--on-ac);
+	}
+	.weekdays button.sel small {
+		color: var(--on-ac);
+	}
+	.toast {
+		position: fixed;
+		z-index: 50;
+		left: 16px;
+		right: 16px;
+		bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+		max-width: 520px;
+		margin: 0 auto;
+		padding: 12px 16px;
+		border-radius: 16px;
+		background: var(--bar);
+		color: var(--bar-tx);
+		font-size: 14px;
 	}
 </style>

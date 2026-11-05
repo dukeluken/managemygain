@@ -13,8 +13,8 @@ import {
 	type Unsubscribe
 } from 'firebase/firestore';
 import { db } from './firebase.ts';
-import type { Plan, PlanRequest, Profile, Workout } from './types.ts';
-import { applyWorkout, createProgram, isoDate, mondayOf, planName } from '#lib/engine/index.ts';
+import type { Plan, PlanRequest, Profile, Program, Workout } from './types.ts';
+import { applyWorkout, createProgram, estimatesAt, isoDate, mondayOf, planName } from '#lib/engine/index.ts';
 
 const now = () => new Date().toISOString();
 const profileRef = (uid: string) => doc(db, 'profiles', uid);
@@ -56,6 +56,7 @@ export function watchPlan(uid: string, planId: string, cb: (p: Plan | null) => v
 
 export async function createPlanFromRequest(uid: string, req: PlanRequest, start = new Date()): Promise<Plan> {
 	const ref = doc(plansCol(uid));
+	const program = createProgram(req);
 	const plan: Plan = {
 		id: ref.id,
 		ownerId: uid,
@@ -67,7 +68,8 @@ export async function createPlanFromRequest(uid: string, req: PlanRequest, start
 		status: 'active',
 		request: req,
 		engine: 'powerlifting-v2',
-		program: createProgram(req),
+		program,
+		startMaxes: estimatesAt(program, 0),
 		createdAt: now(),
 		updatedAt: now()
 	};
@@ -78,8 +80,9 @@ export async function createPlanFromRequest(uid: string, req: PlanRequest, start
 	return plan;
 }
 
-export function savePlan(uid: string, plan: Plan) {
-	return setDoc(doc(plansCol(uid), plan.id), { ...plan, updatedAt: now() });
+/** Programm eines Plans speichern (nach dem Bearbeiten). */
+export function saveProgram(uid: string, planId: string, program: Program) {
+	return updateDoc(doc(plansCol(uid), planId), { program, updatedAt: now() });
 }
 
 // ---------- Trainings ----------
@@ -100,9 +103,9 @@ export function saveWorkout(uid: string, workout: Workout) {
 
 /** Training abschließen und den Plan aus den geloggten Sätzen nachführen. */
 export async function finishWorkout(uid: string, plan: Plan, workout: Workout): Promise<void> {
-	const finished: Workout = { ...workout, finishedAt: now() };
 	const program = structuredClone(plan.program);
-	const changed = applyWorkout(program, finished);
+	const changed = applyWorkout(program, workout);
+	const finished: Workout = { ...workout, finishedAt: now(), estimates: estimatesAt(program, workout.weekIndex) };
 	const batch = writeBatch(db);
 	batch.set(doc(workoutsCol(uid), finished.id), finished);
 	if (changed) batch.update(doc(plansCol(uid), plan.id), { program, updatedAt: now() });

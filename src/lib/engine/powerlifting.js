@@ -391,5 +391,5 @@ function inCurrentCycle(entry, plan) { return belongsToPlan(entry, plan) && entr
 
 export {
   LOAD_MODEL, rpePercent, e1rmFromSet, expectedMax, plannedLoad, applyPlannedLoadsToPlan, updateMaxFromSet, rebaseMaxesForNewCycle, migratePlanLoadModel, defaultProgression, maxSetsPerExposure, EXERCISES, TRAINING_CATS, CAT_LABEL, LIFTS, esc, parseKg, sameKg, roundKg, estimateOneRmFrom3x3, categoryInCatalog, templateCycleWeeks, templateSchedule, phaseRpeTargets, buildWeekSets, calcLoad, generatePlan, sanitizePlan, belongsToPlan, inCurrentCycle,
-  WEEKDAYS, LEVELS, PHASES, ROUNDING_STEPS, DEADLIFT_STANCES
+  WEEKDAYS, LEVELS, PHASES, ROUNDING_STEPS, DEADLIFT_STANCES, applyPlannedLoads
 };

@@ -3,9 +3,9 @@
 	import Icon from './Icon.svelte';
 
 	const items = [
-		{ href: '/', label: 'Heute', icon: 'today' },
+		{ href: '/', label: 'Start', icon: 'home' },
 		{ href: '/plan', label: 'Plan', icon: 'plan' },
-		{ href: '/community', label: 'Community', icon: 'community' },
+		// Community ist vorerst ausgeblendet (Route /community existiert weiter).
 		{ href: '/profil', label: 'Profil', icon: 'profile' }
 	] as const;
 
@@ -48,7 +48,7 @@
 		flex-direction: column;
 		align-items: center;
 		gap: 3px;
-		min-width: 64px;
+		min-width: 72px;
 		padding: 2px 8px;
 		font-size: 11px;
 		text-decoration: none;

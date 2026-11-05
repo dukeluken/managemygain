@@ -1,28 +1,36 @@
 <script lang="ts">
 	import { session } from '#lib/data/session.svelte.ts';
 	import {
+		LIFTS,
+		LIFT_LABEL,
 		WEEKDAY_LONG,
 		WEEKDAY_SHORT,
 		dayPrescription,
 		dayTitle,
+		estimatedMax,
 		estimatedMinutes,
 		heroOf,
 		isDeload,
 		kg,
 		nextDayIndex,
 		parseIsoDate,
+		progressSeries,
 		weekCount,
 		weekIndexAt,
 		weekSlots
 	} from '#lib/engine/index.ts';
+	import Sparkline from '#lib/ui/Sparkline.svelte';
 
 	const today = new Date();
-	const dateLabel = `${WEEKDAY_LONG[today.getDay()]}, ${today.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' })}`;
+	const dateLabel = `${WEEKDAY_LONG[today.getDay()]}, ${today.toLocaleDateString('de-DE', { day: 'numeric', month: 'long' })}`;
 
+	const firstName = $derived((session.profile?.displayName ?? session.user?.displayName ?? '').split(' ')[0]);
 	const plan = $derived(session.plan);
 	const weekIndex = $derived(plan ? weekIndexAt(plan, today) : 0);
 	const weeks = $derived(plan ? weekCount(plan.program) : 0);
 	const inPlan = $derived(!!plan && weekIndex >= 0 && weekIndex < weeks);
+
+	// Nächstes Training
 	const slots = $derived(plan && inPlan ? weekSlots(plan, session.workouts, weekIndex, today) : []);
 	const todaySlot = $derived(slots.find((s) => s.status === 'today'));
 	const dayIndex = $derived(
@@ -31,87 +39,158 @@
 	const day = $derived(plan && dayIndex != null ? plan.program.days[dayIndex] : null);
 	const list = $derived(plan && dayIndex != null ? dayPrescription(plan.program, weekIndex, dayIndex) : []);
 	const hero = $derived(heroOf(list));
-	const rest = $derived(list.filter((p) => p !== hero));
+	const isToday = $derived(dayIndex != null && todaySlot?.dayIndex === dayIndex);
 	const inProgress = $derived(
 		dayIndex != null &&
 			session.workouts.some((w) => w.weekIndex === weekIndex && w.dayIndex === dayIndex && !w.finishedAt)
 	);
+
+	// Woche und Block
 	const doneCount = $derived(slots.filter((s) => s.status === 'done').length);
 	const sessionCount = $derived(slots.filter((s) => s.dayIndex != null).length);
-	const isToday = $derived(todaySlot?.dayIndex === dayIndex && dayIndex != null);
-	const scheduledDay = $derived(day ? WEEKDAY_SHORT[day.weekDay] : '');
+	const nextDeload = $derived(
+		plan ? Array.from({ length: weeks }, (_, i) => i).find((i) => i >= weekIndex && isDeload(plan.program, i)) : undefined
+	);
 
-	function amount(p: { sets: number; reps: string; weight: number | null }) {
-		return `${p.sets} × ${p.reps}${p.weight ? ` · ${kg(p.weight)} kg` : ''}`;
+	// Fortschritt
+	const series = $derived(plan ? progressSeries(plan, session.workouts) : null);
+	const progress = $derived(
+		plan && series
+			? LIFTS.map((lift) => {
+					const values = series[lift].map((p) => p.value);
+					const current = values.length ? values[values.length - 1] : estimatedMax(plan.program, lift, weekIndex);
+					const start = values[0] ?? current;
+					return { lift, values, current, delta: current != null && start != null ? current - start : 0 };
+				}).filter((p) => p.current != null)
+			: []
+	);
+
+	// Zuletzt
+	const last = $derived(
+		[...session.workouts]
+			.filter((w) => w.finishedAt)
+			.sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)))[0]
+	);
+	const lastSets = $derived(last ? last.exercises.reduce((n, e) => n + e.sets.filter((s) => s.done).length, 0) : 0);
+	const totalDone = $derived(session.workouts.filter((w) => w.finishedAt).length);
+
+	function shortDate(iso: string) {
+		const d = parseIsoDate(iso);
+		return `${WEEKDAY_SHORT[d.getDay()]}, ${d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' })}`;
+	}
+	function signed(n: number) {
+		const r = Math.round(n * 10) / 10;
+		return `${r > 0 ? '+' : r < 0 ? '−' : '±'}${kg(Math.abs(r))}`;
 	}
 </script>
 
 <main class="page">
+	<div class="eyebrow"><span>{dateLabel}</span>{#if inPlan}<b>Woche {weekIndex + 1} von {weeks}</b>{/if}</div>
+	<h1 class="title">{firstName ? `Hallo, ${firstName}.` : 'Hallo.'}</h1>
+
 	{#if !plan}
-		<div class="eyebrow"><span>{dateLabel}</span></div>
-		<h1 class="title">Los geht's.</h1>
 		<p class="muted lead">
 			Beantworte ein paar kurze Fragen zu Ziel, Zeit und Erfahrung. Daraus entsteht dein Plan mit Gewichten für jede Woche.
 		</p>
 		<a class="cta" href="/start"><span>Plan erstellen</span><small>ca. 1 min</small></a>
 	{:else if weekIndex < 0}
-		<div class="eyebrow"><span>{dateLabel}</span></div>
-		<h1 class="title">Bald geht's los.</h1>
 		<p class="muted lead">Dein Plan startet am Montag, {parseIsoDate(plan.startDate).toLocaleDateString('de-DE')}.</p>
 	{:else if !inPlan}
-		<div class="eyebrow"><span>{dateLabel}</span><b>Block geschafft</b></div>
-		<h1 class="title">{weeks} Wochen durchgezogen.</h1>
-		<p class="muted lead">Zeit für den nächsten Block. Die neuen Gewichte bauen auf deinen geschätzten Bestwerten auf.</p>
-		<a class="cta" href="/start"><span>Neuen Plan erstellen</span></a>
+		<section class="tile card">
+			<div class="label"><b>Block geschafft</b></div>
+			<p class="muted">{weeks} Wochen durchgezogen. Der nächste Block baut auf deinen neuen Bestwerten auf.</p>
+			<a class="cta" href="/start"><span>Neuen Plan erstellen</span></a>
+		</section>
 	{:else}
-		<div class="eyebrow">
-			<span>{dateLabel}</span><b>Woche {weekIndex + 1} von {weeks}</b>
-		</div>
-
+		<!-- Nächstes Training -->
 		{#if day}
-			<div>
-				<h1 class="title">{dayTitle(day)}</h1>
-				<p class="muted sub">
-					{isToday ? 'Heute' : `Nächstes Training · geplant für ${scheduledDay}`}{isDeload(plan.program, weekIndex)
-						? ' · Entlastungswoche'
-						: ''}
-				</p>
-			</div>
-
-			{#if hero}
-				<section class="tile hero" aria-label="Hauptübung">
-					<div class="lab"><b>{hero.exercise}</b>{hero.sets} × {hero.reps} Wdh.</div>
-					<div class="display num big">{kg(hero.weight)}<small> kg</small></div>
-				</section>
-			{/if}
-
-			{#if rest.length}
-				<section class="tile list" aria-label="Weitere Übungen">
-					{#each rest as p, i (i)}
-						<div class="row"><b>{p.exercise}</b><span class="num">{amount(p)}</span></div>
-					{/each}
-				</section>
-			{/if}
-
-			<a class="cta" href="/training?w={weekIndex}&d={dayIndex}">
-				<span>{inProgress ? 'Training fortsetzen' : 'Training starten'}</span>
-				<small>~{estimatedMinutes(list)} min</small>
-			</a>
+			<section class="tile card next" aria-label="Nächstes Training">
+				<div class="label">
+					<b>{isToday ? 'Heute' : 'Als Nächstes'}</b>
+					<span class="muted">{isToday ? '' : `geplant für ${WEEKDAY_LONG[day.weekDay]}`}</span>
+				</div>
+				<div class="next-main">
+					<div>
+						<h2 class="display">{dayTitle(day)}</h2>
+						<p class="muted meta">
+							{list.length} Übungen{isDeload(plan.program, weekIndex) ? ' · Entlastungswoche' : ''}
+						</p>
+					</div>
+					{#if hero?.weight}
+						<div class="hero-num">
+							<span class="display num">{kg(hero.weight)}</span>
+							<small class="muted">kg · {hero.sets} × {hero.reps}</small>
+						</div>
+					{/if}
+				</div>
+				<a class="cta" href="/training?w={weekIndex}&d={dayIndex}">
+					<span>{inProgress ? 'Training fortsetzen' : 'Training starten'}</span>
+					<small>~{estimatedMinutes(list)} min</small>
+				</a>
+			</section>
 		{:else}
-			<div>
-				<h1 class="title">Woche geschafft.</h1>
-				<p class="muted sub">Alle Einheiten erledigt. Erhol dich gut, nächste Woche geht's weiter.</p>
-			</div>
+			<section class="tile card">
+				<div class="label"><b>Woche geschafft</b></div>
+				<p class="muted">Alle Einheiten erledigt. Erhol dich gut, nächste Woche geht's weiter.</p>
+			</section>
 		{/if}
 
-		<section aria-label="Diese Woche">
-			<div class="eyebrow week-head"><span>Diese Woche</span><span>{doneCount} von {sessionCount} Einheiten</span></div>
-			<div class="tile week">
-				{#each slots as s (s.weekDay)}
-					<span class="slot {s.status}" title={s.status}>
-						<i></i>{WEEKDAY_SHORT[s.weekDay]}
-					</span>
+		<!-- Woche und Block -->
+		<div class="pair">
+			<section class="tile small" aria-label="Diese Woche">
+				<div class="label"><span class="muted">Diese Woche</span></div>
+				<div class="figure"><span class="display num">{doneCount}</span><small class="muted">von {sessionCount}</small></div>
+				<div class="dots">
+					{#each slots as s (s.weekDay)}
+						<span class="dot {s.status}" title="{WEEKDAY_SHORT[s.weekDay]}: {s.status}"><i></i>{WEEKDAY_SHORT[s.weekDay][0]}</span>
+					{/each}
+				</div>
+			</section>
+			<a class="tile small" href="/plan" aria-label="Block, zum Plan">
+				<div class="label"><span class="muted">Block</span></div>
+				<div class="figure"><span class="display num">{weekIndex + 1}</span><small class="muted">von {weeks} Wochen</small></div>
+				<div class="bar" aria-hidden="true">
+					{#each Array.from({ length: weeks }, (_, i) => i) as i (i)}
+						<i class:done={i < weekIndex} class:cur={i === weekIndex} class:deload={isDeload(plan.program, i)}></i>
+					{/each}
+				</div>
+				<small class="muted foot">
+					{nextDeload === weekIndex ? 'Jetzt: Entlastungswoche' : nextDeload != null ? `Entlastung in Woche ${nextDeload + 1}` : 'Letzte Phase'}
+				</small>
+			</a>
+		</div>
+	{/if}
+
+	{#if plan && progress.length}
+		<section aria-label="Fortschritt">
+			<div class="eyebrow head"><span>Fortschritt · geschätzte Bestwerte</span><span>{totalDone} Trainings</span></div>
+			<div class="tile progress">
+				{#each progress as p (p.lift)}
+					<div class="prow">
+						<div class="pname">
+							<span>{LIFT_LABEL[p.lift]}</span>
+							<small class:up={p.delta > 0.05} class:muted={p.delta <= 0.05}>{signed(p.delta)} kg seit Start</small>
+						</div>
+						<Sparkline
+							values={p.values.length ? p.values : [p.current ?? 0]}
+							label="{LIFT_LABEL[p.lift]}: von {kg(Math.round(p.values[0] ?? p.current ?? 0))} auf {kg(Math.round(p.current ?? 0))} kg"
+						/>
+						<b class="display num pval">{kg(Math.round(p.current ?? 0))}</b>
+					</div>
 				{/each}
+			</div>
+		</section>
+	{/if}
+
+	{#if last}
+		<section aria-label="Zuletzt">
+			<div class="eyebrow head"><span>Zuletzt</span></div>
+			<div class="tile lastw">
+				<div>
+					<b>{last.dayName}</b>
+					<small class="muted">{shortDate(last.date)} · Woche {last.weekIndex + 1}</small>
+				</div>
+				<span class="muted num">{lastSets ? `${lastSets} Sätze` : 'erledigt'}</span>
 			</div>
 		</section>
 	{/if}
@@ -123,96 +202,204 @@
 		font-size: 16px;
 		max-width: 36ch;
 	}
-	.sub {
-		margin: 6px 0 0;
-	}
-	.hero {
+	.card {
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
-		padding: 16px 18px 18px;
+		gap: 14px;
+		padding: 18px;
 	}
-	.lab {
-		font-size: 13px;
-		color: var(--mu);
+	.card p {
+		margin: 0;
 	}
-	.lab b {
-		color: var(--tx);
-		font-weight: 600;
-		margin-right: 6px;
-	}
-	.big {
-		font-size: 88px;
-		color: var(--ac-ink);
-	}
-	.big small {
-		font-size: 30px;
-		color: var(--tx);
-		letter-spacing: 0;
-	}
-	.list {
-		padding: 4px 18px;
-	}
-	.row {
+	.label {
 		display: flex;
 		justify-content: space-between;
 		align-items: baseline;
-		gap: 12px;
-		padding: 12px 0;
-		border-bottom: 1px solid var(--sf2);
+		gap: 10px;
+		font-size: 13px;
 	}
-	.row:last-child {
-		border: 0;
+	.label b {
+		color: var(--ac-ink);
+		font-weight: 650;
 	}
-	.row b {
-		font-weight: 600;
+	.next-main {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-end;
+		gap: 16px;
 	}
-	.row span {
-		color: var(--mu);
+	.next-main h2 {
+		margin: 0;
+		font-size: 34px;
+		text-wrap: balance;
+	}
+	.meta {
+		margin: 6px 0 0 !important;
+		font-size: 13px;
+	}
+	.hero-num {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 4px;
+		flex: none;
+	}
+	.hero-num .display {
+		font-size: 64px;
+		color: var(--ac-ink);
+	}
+	.hero-num small {
+		font-size: 12px;
 		white-space: nowrap;
 	}
-	.week-head {
-		margin-bottom: 10px;
+	.pair {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 12px;
 	}
-	.week {
+	.small {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		padding: 14px 16px 16px;
+		text-decoration: none;
+		min-width: 0;
+	}
+	.figure {
+		display: flex;
+		align-items: baseline;
+		gap: 6px;
+	}
+	.figure .display {
+		font-size: 44px;
+	}
+	.figure small {
+		font-size: 13px;
+	}
+	.dots {
 		display: grid;
 		grid-template-columns: repeat(7, 1fr);
-		gap: 4px;
-		padding: 12px 8px;
+		gap: 2px;
 		text-align: center;
 	}
-	.slot {
+	.dot {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 6px;
-		font-size: 11px;
+		gap: 4px;
+		font-size: 10px;
 		color: var(--mu);
 	}
-	.slot i {
+	.dot i {
 		width: 8px;
 		height: 8px;
 		border-radius: 50%;
 		background: var(--sf2);
 	}
-	.slot.rest i {
+	.dot.rest i {
 		background: transparent;
 		box-shadow: inset 0 0 0 1px var(--sf2);
 	}
-	.slot.done i {
+	.dot.done i {
 		background: var(--tx);
 	}
-	.slot.today,
-	.slot.next {
+	.dot.today,
+	.dot.next {
 		color: var(--ac-ink);
 		font-weight: 700;
 	}
-	.slot.today i,
-	.slot.next i {
+	.dot.today i,
+	.dot.next i {
 		background: var(--ac);
 	}
-	.slot.missed i {
+	.dot.missed i {
 		background: transparent;
 		box-shadow: inset 0 0 0 1.5px var(--mu);
+	}
+	.bar {
+		display: flex;
+		gap: 2px;
+		height: 8px;
+	}
+	.bar i {
+		flex: 1;
+		border-radius: 3px;
+		background: var(--sf2);
+	}
+	.bar i.done {
+		background: var(--tx);
+	}
+	.bar i.cur {
+		background: var(--ac);
+	}
+	.bar i.deload:not(.cur) {
+		background: transparent;
+		box-shadow: inset 0 0 0 1.5px var(--ok);
+	}
+	.foot {
+		font-size: 12px;
+	}
+	.head {
+		margin-bottom: 10px;
+	}
+	.progress {
+		padding: 4px 18px;
+	}
+	.prow {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 96px 62px;
+		align-items: center;
+		gap: 12px;
+		padding: 12px 0;
+		border-bottom: 1px solid var(--sf2);
+	}
+	.prow:last-child {
+		border: 0;
+	}
+	.pname {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+	.pname span {
+		font-weight: 600;
+	}
+	.pname small {
+		font-size: 12px;
+	}
+	.pname small.up {
+		color: var(--ok);
+	}
+	.pval {
+		font-size: 32px;
+		text-align: right;
+	}
+	.lastw {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 12px;
+		padding: 14px 18px;
+	}
+	.lastw div {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.lastw small {
+		font-size: 12px;
+	}
+	@media (max-width: 360px) {
+		.pair {
+			grid-template-columns: 1fr;
+		}
+		.next-main {
+			flex-direction: column;
+			align-items: flex-start;
+		}
+		.hero-num {
+			align-items: flex-start;
+		}
 	}
 </style>

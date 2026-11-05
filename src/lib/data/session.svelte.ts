@@ -9,18 +9,29 @@ import {
 	signOut as fbSignOut
 } from 'firebase/auth';
 import type { Unsubscribe } from 'firebase/firestore';
-import { applyWorkout, createProgram, isoDate, mondayOf, planName } from '#lib/engine/index.ts';
+import {
+	LIFTS,
+	applyWorkout,
+	createProgram,
+	dayTitle,
+	estimatesAt,
+	isoDate,
+	mondayOf,
+	planName,
+	weekIndexAt
+} from '#lib/engine/index.ts';
 import { auth } from './firebase.ts';
 import {
 	createPlanFromRequest,
 	ensureProfile,
 	finishWorkout,
+	saveProgram,
 	saveWorkout,
 	watchPlan,
 	watchProfile,
 	watchWorkouts
 } from './repo.ts';
-import type { Plan, PlanRequest, Profile, Workout } from './types.ts';
+import type { Plan, PlanRequest, Profile, Program, Workout } from './types.ts';
 
 export interface SessionUser {
 	uid: string;
@@ -99,14 +110,34 @@ class Session {
 		if (!this.user || !this.plan) return;
 		const plan = $state.snapshot(this.plan) as Plan;
 		if (this.demo) {
-			const finished = { ...workout, finishedAt: new Date().toISOString() };
 			const program = structuredClone(plan.program);
-			applyWorkout(program, finished);
+			applyWorkout(program, workout);
+			const finished = {
+				...workout,
+				finishedAt: new Date().toISOString(),
+				estimates: estimatesAt(program, workout.weekIndex)
+			};
 			this.plan = { ...plan, program };
 			this.#upsertLocal(finished);
 			return;
 		}
 		await finishWorkout(this.user.uid, plan, workout);
+	}
+
+	/**
+	 * Plan ändern: `change` bekommt eine Kopie des Programms und verändert sie.
+	 * Die Anzeige aktualisiert sofort, gespeichert wird im Hintergrund.
+	 */
+	editPlan(change: (program: Program) => void) {
+		if (!this.user || !this.plan) return;
+		const program = structuredClone($state.snapshot(this.plan.program)) as Program;
+		change(program);
+		this.plan = { ...this.plan, program };
+		if (this.demo) return;
+		saveProgram(this.user.uid, this.plan.id, program).catch((e) => {
+			console.warn(e);
+			this.error = 'Änderung konnte nicht gespeichert werden. Sie wird nachgeholt, sobald Verbindung besteht.';
+		});
 	}
 
 	async signIn() {
@@ -232,6 +263,7 @@ const DEMO_REQUEST: PlanRequest = {
 
 function demoPlan(req: PlanRequest, start: Date): Plan {
 	const ts = new Date().toISOString();
+	const program = createProgram(req);
 	return {
 		id: 'demo-plan',
 		ownerId: 'demo',
@@ -243,16 +275,26 @@ function demoPlan(req: PlanRequest, start: Date): Plan {
 		status: 'active',
 		request: req,
 		engine: 'powerlifting-v2',
-		program: createProgram(req),
+		program,
+		startMaxes: estimatesAt(program, 0),
 		createdAt: ts,
 		updatedAt: ts
 	};
 }
 
-/** Erledigte Trainings für alle Einheiten vor heute. */
+/**
+ * Erledigte Trainings für alle Einheiten vor heute. Der erfundene Verlauf steigt von
+ * etwas unter dem Startwert bis genau zum aktuellen Planwert, damit ein neues
+ * Training in der Demo nahtlos anschließt. Setzt dafür auch plan.startMaxes.
+ */
 function demoHistory(plan: Plan, now: Date): Workout[] {
 	const result: Workout[] = [];
 	const start = new Date(`${plan.startDate}T12:00:00`);
+	const end = estimatesAt(plan.program, weekIndexAt(plan, now));
+	const base = Object.fromEntries(
+		LIFTS.map((l, k) => [l, end[l] ? Math.round(end[l]! * (0.96 - 0.01 * k) * 10) / 10 : null])
+	) as Record<(typeof LIFTS)[number], number | null>;
+	plan.startMaxes = base;
 	plan.program.days.forEach((day, dayIndex) => {
 		for (let week = 0; week < 6; week++) {
 			const date = new Date(start);
@@ -264,13 +306,20 @@ function demoHistory(plan: Plan, now: Date): Workout[] {
 				planId: plan.id,
 				weekIndex: week,
 				dayIndex,
-				dayName: day.name,
+				dayName: dayTitle(day),
 				date: isoDate(date),
 				startedAt: date.toISOString(),
 				finishedAt: date.toISOString(),
 				exercises: []
 			});
 		}
+	});
+	result.sort((a, b) => a.date.localeCompare(b.date));
+	result.forEach((w, i) => {
+		const t = (i + 1) / result.length;
+		w.estimates = Object.fromEntries(
+			LIFTS.map((l) => [l, base[l] && end[l] ? Math.round((base[l]! + (end[l]! - base[l]!) * t) * 10) / 10 : null])
+		) as Workout['estimates'];
 	});
 	return result;
 }

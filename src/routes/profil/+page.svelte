@@ -2,7 +2,6 @@
 	import { goto } from '$app/navigation';
 	import { session } from '#lib/data/session.svelte.ts';
 	import type { ThemePref } from '#lib/data/types.ts';
-	import { LIFT_LABEL, kg } from '#lib/engine/index.ts';
 	import { applyTheme, getThemePref } from '#lib/ui/theme.ts';
 
 	let theme = $state<ThemePref>(getThemePref());
@@ -12,7 +11,6 @@
 	}
 
 	const plan = $derived(session.plan);
-	const maxes = $derived(plan?.program.maxes);
 	const finished = $derived(session.workouts.filter((w) => w.finishedAt).length);
 	let confirmNew = $state(false);
 </script>
@@ -21,20 +19,7 @@
 	<div class="eyebrow"><span>Profil</span></div>
 	<h1 class="title">{session.profile?.displayName ?? session.user?.displayName ?? 'Athlet'}</h1>
 
-	{#if plan && maxes}
-		<section>
-			<div class="eyebrow head"><span>Geschätzte Bestwerte (1 Wdh.)</span></div>
-			<div class="tile maxes">
-				{#each ['squat', 'bench', 'deadlift'] as const as l (l)}
-					<div class="max">
-						<span class="muted">{LIFT_LABEL[l]}</span>
-						<b class="display num">{typeof maxes[l] === 'number' ? kg(Math.round(maxes[l] as number)) : '–'}</b>
-					</div>
-				{/each}
-			</div>
-			<p class="muted note">Passen sich nach jedem Training an deine geloggten Sätze an.</p>
-		</section>
-
+	{#if plan}
 		<section>
 			<div class="eyebrow head"><span>Aktueller Plan</span></div>
 			<div class="tile rows">
@@ -71,26 +56,6 @@
 <style>
 	.head {
 		margin-bottom: 10px;
-	}
-	.maxes {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		padding: 16px 18px;
-		gap: 8px;
-	}
-	.max {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-		font-size: 12px;
-	}
-	.max b {
-		font-size: 40px;
-		color: var(--ac-ink);
-	}
-	.note {
-		margin: 8px 0 0;
-		font-size: 13px;
 	}
 	.rows {
 		padding: 2px 18px;
