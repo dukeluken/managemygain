@@ -1,43 +1,57 @@
-# MANAGE MY GAIN
+# managemygain
 
-Eine installierbare Web-App für Kraftdreikampf mit Google-Anmeldung, privaten Trainingsdaten pro Konto, Planvorlagen, Trainingslog und Quick-Edit für Vorgabe und tatsächlich gehobenes Gewicht.
+Trainingsplan-App für Kraftsport: Plan erstellen, Woche für Woche trainieren, Fortschritt sehen.
 
-## Funktionen
+Version 2 ist ein Neuaufbau mit SvelteKit. Die alte Vanilla-JS-App liegt in `legacy/` (Tag `v1`).
 
-- Browser-Website und installierbare PWA auf iOS/Android.
-- Anmeldung mit Google über Firebase Authentication.
-- Mehrere benannte Trainingspläne und Historie in Cloud Firestore. Regeln begrenzen jeden Datensatz auf die angemeldete UID.
-- Plan-Generator mit 72 kombinierten Vorlagen: 2–5 Trainingstage × Squat/Bench/Deadlift-Spezialisierung × Hypertrophie/Kraft × drei Erfahrungsstufen.
-- 3×3-Arbeitsgewichte als Basis eines geschätzten 1RM. Die Schätzung nimmt an, dass der letzte Satz ungefähr RPE 8 erreicht; angegebene Maxima und Startlasten sind Schätzwerte.
-- Trainingsblock mit 8, 12 oder 16 Wochen je nach Trainingsstand; bei zwei Trainingstagen wird er um vier Wochen verlängert, bei fünf Tagen um vier verkürzt (mindestens acht Wochen). Alle vier Wochen folgt ein Deload. Je Einheit entstehen vier bis fünf Übungen.
-- Übungskategorien; Kategorie- und Übungswechsel berechnen die Vorgaben neu. Trainingspläne lassen sich tageweise mit Stift-Icon bearbeiten, inklusive Tag, Übungszeilen, Hinzufügen und Entfernen. Im Training gibt es getrennte Felder für geplantes und tatsächlich gehobenes Gewicht.
+## Entwicklung
 
-## Firebase einrichten — kostenloser Einstieg
+```sh
+npm install
+npm run dev          # http://localhost:5173
+npm test             # Engine- und Adapter-Tests (Vitest)
+npm run check        # Typprüfung
+npm run build        # statische App nach build/
+```
 
-1. Erstelle in der [Firebase Console](https://console.firebase.google.com/) ein Projekt im **Spark-Tarif** und registriere eine Web-App.
-2. Kopiere die Web-Konfiguration aus **Projekteinstellungen → Deine Apps** nach `config.js`. Diese Client-Konfiguration ist für eine Web-App sichtbar und enthält keine Admin-Schlüssel.
-3. Aktiviere **Authentication → Sign-in method → Google**. Ergänze bei **Authorized domains** `localhost` und `127.0.0.1` für den lokalen Test; die Firebase-Hosting-Domain kommt nach dem Hosting-Setup dazu.
-4. Erstelle unter **Firestore Database** eine Datenbank im Produktionsmodus.
-5. Installiere die Firebase CLI (`npm install -g firebase-tools`), melde dich an (`firebase login`) und verknüpfe dieses lokale Projekt (`firebase use --add`).
-6. Veröffentliche Hosting und die Eigentümer-Regeln: `firebase deploy --only hosting,firestore:rules`.
-7. Öffne die angezeigte `*.web.app`-Adresse. Über die HTTPS-Seite lässt sich die App auf dem Handy zum Startbildschirm hinzufügen bzw. installieren.
+**Demo-Modus** (nur `npm run dev`, ohne Anmeldung, Daten nur im Speicher):
 
-Hosting hat im No-Cost-Kontingent derzeit 10 GB gespeicherte Hosting-Dateien und 10 GB Datentransfer pro Monat. Firestore enthält ein kostenloses Kontingent für eine Datenbank (1 GiB und tägliche Lese-/Schreiblimits). Bei Überschreitung können Dienste im Spark-Tarif pausieren; es wird nicht automatisch auf einen kostenpflichtigen Tarif umgestellt. [Hosting-Kontingente](https://firebase.google.com/docs/hosting/usage-quotas-pricing), [Firestore-Kontingente](https://firebase.google.com/docs/firestore/pricing).
+- `/?demo` mit Beispielplan in Woche 3
+- `/?demo=leer` ohne Plan, zum Testen der Einstiegsfragen
+- `&theme=light` für den hellen Modus
 
-## Privatsphäre
+Beenden über Profil → Abmelden.
 
-Lege das GitHub-Repository auf **Private**. Firestore speichert die Daten unter `users/{Firebase-UID}`; [firestore.rules](firestore.rules) lässt Lesen und Schreiben nur durch das zugehörige Google-Konto zu. `firebase.json` schließt den früheren Apps-Script-Ordner und diese README vom Website-Upload aus. Die Firebase-Client-Konfiguration und die ausgelieferten HTML-/JavaScript-Dateien sind im Browser sichtbar; das ist für eine statische Website normal und macht das Repository nicht öffentlich.
+## Aufbau
 
-Die frühere Apps-Script-Web-App wird von dieser Version nicht mehr benutzt. Falls du sie bereitgestellt hast, entferne oder deaktiviere sie unter **Apps Script → Bereitstellen → Bereitstellungen verwalten**, damit sie nicht weiter öffentlich auf dein Sheet zugreifen kann. Bisherige Sheet-Daten werden nicht automatisch nach Firestore kopiert.
+```
+src/
+  app.css                 Design-System (Farben, Schrift, Glas)
+  lib/engine/
+    powerlifting.js       Planerzeugung und Lastmodell (aus v1 übernommen)
+    index.ts              Brücke zur App: Wochen, Vorgaben, Anstrengung, Autoregulation
+  lib/data/
+    types.ts              Datenmodell (Profil, Plan, Training), vorbereitet für Coach und KI
+    firebase.ts           Firebase mit Offline-Cache
+    repo.ts               alle Firestore-Zugriffe
+    session.svelte.ts     globaler Zustand und Aktionen
+  lib/ui/                 Leiste, Icons, Hintergrundlicht, Anmeldung
+  routes/                 Heute, Plan, Training, Einstiegsfragen, Community, Profil
+legacy/                   v1-App, Referenz für die spätere Datenübernahme
+```
 
-## Lokal entwickeln
+Interne Importe nutzen `#lib/...` mit Dateiendung (SvelteKit 3).
 
-Öffne `index.html` über VS Code Live Server. Für Google-Login muss `config.js` eine Firebase-Konfiguration enthalten und der lokale Host bei Firebase als autorisierte Domain eingetragen sein. Firestore-Regeln lokal testen kannst du mit der Firebase Local Emulator Suite.
+## Daten
 
-Die reine Programmlogik (Plan-Generator, Bereinigung importierter Pläne, Historien-Zuordnung) liegt in `logic.js` und wird mit `npm test` (Node 18+) geprüft.
+Firestore-Pfade: `profiles/{uid}`, `profiles/{uid}/plans/{planId}`, `profiles/{uid}/workouts/{workoutId}`.
+Die v1-Daten unter `users/{uid}` bleiben unverändert, bis die Übernahme gebaut ist.
 
-**Synchronisierung:** Jede Speicherung erhöht im Firestore-Dokument das Feld `revision`. Hat ein anderes Gerät zwischenzeitlich gespeichert, fragt die App, welcher Stand gelten soll, statt still zu überschreiben. Solange die Cloud-Daten nicht geladen werden konnten (offline), speichert die App nur lokal und synchronisiert, sobald die Verbindung wieder steht. Client und Regeln gehören zusammen: nach Änderungen immer `firebase deploy --only hosting,firestore:rules` gemeinsam ausführen.
+## Deploy
 
-## Trainingsprogramm
+```sh
+npm run build
+firebase deploy --only hosting,firestore:rules
+```
 
-Die Vorlagen sind editierbare Startpunkte, keine individuell validierten oder offiziell „approved“ Coaching-Pläne. Die 3×3-Eingabe schätzt das 1RM mit einer einfachen Wiederholungs-/RIR-Heuristik; sie ersetzt keine gemessene Maximalleistung. Die Volumenwerte sind konservative Programmier-Leitplanken, keine universellen Optima. Details, Quellenlage und die Designentscheidungen stehen in [TRAINING_TEMPLATES_RESEARCH.md](TRAINING_TEMPLATES_RESEARCH.md).
+Achtung: Ein Hosting-Deploy von diesem Branch ersetzt die v1-App für alle Nutzer.

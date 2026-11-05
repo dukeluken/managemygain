@@ -1,0 +1,9 @@
+{
+  "name": "managemygain",
+  "short_name": "managemygain",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1113",
+  "theme_color": "#0f1113",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
