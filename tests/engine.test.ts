@@ -15,12 +15,13 @@ import {
 } from '../src/lib/engine';
 
 const req: PlanRequest = {
-	goal: 'strength',
+	goal: 'powerlifting',
+	block: 'strength',
 	daysPerWeek: 4,
 	experience: 'intermediate',
 	focus: 'squat',
 	deadliftStance: 'conventional',
-	working3RM: { squat: 140, bench: 100, deadlift: 180 }
+	bests: { squat: 165, bench: 118, deadlift: 210 }
 };
 
 function makePlan(start = '2026-11-02'): Plan {
@@ -101,9 +102,10 @@ describe('Programm und Vorgaben', () => {
 	test('Wettkampfnamen nur bei Powerlifting', () => {
 		const names = (r: PlanRequest) =>
 			createProgram(r).days.flatMap((d) => d.exercises.map((e) => e.exercise));
-		expect(names(req).some((n) => n.startsWith('Wettkampf'))).toBe(false);
-		expect(names(req)).toContain('Kniebeuge');
-		expect(names({ ...req, goal: 'powerlifting' })).toContain('Wettkampfkniebeuge');
+		const strength = { ...req, goal: 'strength' as const };
+		expect(names(strength).some((n) => n.startsWith('Wettkampf'))).toBe(false);
+		expect(names(strength)).toContain('Kniebeuge');
+		expect(names(req)).toContain('Wettkampfkniebeuge');
 	});
 
 	test('Tagestitel aus Hauptübungen', () => {

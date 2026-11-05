@@ -28,8 +28,10 @@ Beenden über Profil → Abmelden.
 src/
   app.css                 Design-System (Farben, Schrift, Glas)
   lib/engine/
-    powerlifting.js       Planerzeugung und Lastmodell (aus v1 übernommen)
-    index.ts              Brücke zur App: Wochen, Vorgaben, Anstrengung, Autoregulation
+    powerlifting.js       Powerlifting-Pläne (aus v1 übernommen)
+    splits.ts             Muskelaufbau, Kraft, Fitness: Ganzkörper, Ober/Unter, Push/Pull/Beine
+    loads.ts              Gewichte aus den eigenen Bestwerten (RPE-Tabelle), Autoregulation
+    index.ts              Brücke zur App: Wochen, Vorgaben, Bearbeiten, Fortschritt
   lib/data/
     types.ts              Datenmodell (Profil, Plan, Training), vorbereitet für Coach und KI
     firebase.ts           Firebase mit Offline-Cache

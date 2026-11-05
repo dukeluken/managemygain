@@ -16,12 +16,13 @@ import {
 } from '../src/lib/engine';
 
 const req: PlanRequest = {
-	goal: 'strength',
+	goal: 'powerlifting',
+	block: 'strength',
 	daysPerWeek: 4,
 	experience: 'intermediate',
 	focus: 'squat',
 	deadliftStance: 'conventional',
-	working3RM: { squat: 140, bench: 100, deadlift: 180 }
+	bests: { squat: 165, bench: 118, deadlift: 210 }
 };
 
 function mainSlot(program: Program, category = 'squatMain') {
@@ -150,8 +151,8 @@ describe('Fortschritt', () => {
 		const plan = { startDate: '2026-11-02', startMaxes, program } as Plan;
 		const w = (date: string, squat: number): Workout =>
 			({ finishedAt: `${date}T18:00:00Z`, date, estimates: { squat, bench: startMaxes.bench, deadlift: startMaxes.deadlift } }) as Workout;
-		const s = progressSeries(plan, [w('2026-11-05', 170), w('2026-11-03', 165), w('2026-11-06', 170)]);
-		expect(s.squat.map((p) => p.value)).toEqual([startMaxes.squat, 165, 170]);
+		const s = progressSeries(plan, [w('2026-11-05', 172), w('2026-11-03', 168), w('2026-11-06', 172)]);
+		expect(s.squat!.map((p) => p.value)).toEqual([startMaxes.squat, 168, 172]);
 		expect(s.bench).toHaveLength(1);
 	});
 });

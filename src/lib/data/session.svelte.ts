@@ -10,14 +10,15 @@ import {
 } from 'firebase/auth';
 import type { Unsubscribe } from 'firebase/firestore';
 import {
-	LIFTS,
 	applyWorkout,
 	createProgram,
 	dayTitle,
+	applyBests,
 	estimatesAt,
 	isoDate,
 	mondayOf,
 	planName,
+	weekCount,
 	weekIndexAt
 } from '#lib/engine/index.ts';
 import { auth } from './firebase.ts';
@@ -27,11 +28,12 @@ import {
 	finishWorkout,
 	saveProgram,
 	saveWorkout,
+	updateProfile,
 	watchPlan,
 	watchProfile,
 	watchWorkouts
 } from './repo.ts';
-import type { Plan, PlanRequest, Profile, Program, Workout } from './types.ts';
+import type { Bests, MainLift, Plan, PlanRequest, Profile, Program, Workout } from './types.ts';
 
 export interface SessionUser {
 	uid: string;
@@ -91,6 +93,7 @@ class Session {
 		if (this.demo) {
 			this.plan = demoPlan(req, new Date());
 			this.workouts = [];
+			if (this.profile) this.profile = { ...this.profile, bests: req.bests, activePlanId: this.plan.id };
 			return;
 		}
 		await createPlanFromRequest(this.user.uid, req);
@@ -137,6 +140,25 @@ class Session {
 		saveProgram(this.user.uid, this.plan.id, program).catch((e) => {
 			console.warn(e);
 			this.error = 'Änderung konnte nicht gespeichert werden. Sie wird nachgeholt, sobald Verbindung besteht.';
+		});
+	}
+
+	/**
+	 * Eigene Bestwerte ändern. Der aktive Plan rechnet ab der aktuellen Woche mit
+	 * den neuen Werten; vergangene Wochen bleiben, wie sie trainiert wurden.
+	 */
+	setBests(bests: Bests) {
+		if (!this.user || !this.profile) return;
+		const merged = { ...(this.profile.bests ?? {}), ...bests };
+		this.profile = { ...this.profile, bests: merged, bestsUpdatedAt: new Date().toISOString() };
+		if (this.plan) {
+			const week = Math.min(Math.max(0, weekIndexAt(this.plan, new Date())), weekCount(this.plan.program) - 1);
+			this.editPlan((program) => applyBests(program, bests, week));
+		}
+		if (this.demo) return;
+		updateProfile(this.user.uid, { bests: merged, bestsUpdatedAt: new Date().toISOString() }).catch((e) => {
+			console.warn(e);
+			this.error = 'Bestwerte konnten nicht gespeichert werden. Sie werden nachgeholt, sobald Verbindung besteht.';
 		});
 	}
 
@@ -234,6 +256,7 @@ class Session {
 			activePlanId: this.plan?.id ?? null,
 			coachId: null,
 			effortScale: 'simple',
+			bests: mode === 'leer' ? undefined : DEMO_REQUEST.bests,
 			createdAt: now.toISOString(),
 			updatedAt: now.toISOString()
 		};
@@ -256,9 +279,8 @@ const DEMO_REQUEST: PlanRequest = {
 	goal: 'strength',
 	daysPerWeek: 4,
 	experience: 'intermediate',
-	focus: 'squat',
-	deadliftStance: 'conventional',
-	working3RM: { squat: 120, bench: 85, deadlift: 150 }
+	block: 'strength',
+	bests: { squat: 140, bench: 100, deadlift: 175, press: 62.5 }
 };
 
 function demoPlan(req: PlanRequest, start: Date): Plan {
@@ -274,7 +296,7 @@ function demoPlan(req: PlanRequest, start: Date): Plan {
 		startDate: isoDate(mondayOf(start)),
 		status: 'active',
 		request: req,
-		engine: 'powerlifting-v2',
+		engine: program.engine === 'splits-v1' ? 'splits-v1' : 'powerlifting-v2',
 		program,
 		startMaxes: estimatesAt(program, 0),
 		createdAt: ts,
@@ -291,9 +313,10 @@ function demoHistory(plan: Plan, now: Date): Workout[] {
 	const result: Workout[] = [];
 	const start = new Date(`${plan.startDate}T12:00:00`);
 	const end = estimatesAt(plan.program, weekIndexAt(plan, now));
+	const lifts = Object.keys(end) as MainLift[];
 	const base = Object.fromEntries(
-		LIFTS.map((l, k) => [l, end[l] ? Math.round(end[l]! * (0.96 - 0.01 * k) * 10) / 10 : null])
-	) as Record<(typeof LIFTS)[number], number | null>;
+		lifts.map((l, k) => [l, end[l] ? Math.round(end[l]! * (0.96 - 0.01 * k) * 10) / 10 : null])
+	) as Partial<Record<MainLift, number | null>>;
 	plan.startMaxes = base;
 	plan.program.days.forEach((day, dayIndex) => {
 		for (let week = 0; week < 6; week++) {
@@ -318,7 +341,7 @@ function demoHistory(plan: Plan, now: Date): Workout[] {
 	result.forEach((w, i) => {
 		const t = (i + 1) / result.length;
 		w.estimates = Object.fromEntries(
-			LIFTS.map((l) => [l, base[l] && end[l] ? Math.round((base[l]! + (end[l]! - base[l]!) * t) * 10) / 10 : null])
+			lifts.map((l) => [l, base[l] && end[l] ? Math.round((base[l]! + (end[l]! - base[l]!) * t) * 10) / 10 : null])
 		) as Workout['estimates'];
 	});
 	return result;

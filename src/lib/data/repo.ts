@@ -67,7 +67,7 @@ export async function createPlanFromRequest(uid: string, req: PlanRequest, start
 		startDate: isoDate(mondayOf(start)),
 		status: 'active',
 		request: req,
-		engine: 'powerlifting-v2',
+		engine: program.engine === 'splits-v1' ? 'splits-v1' : 'powerlifting-v2',
 		program,
 		startMaxes: estimatesAt(program, 0),
 		createdAt: now(),
@@ -75,7 +75,12 @@ export async function createPlanFromRequest(uid: string, req: PlanRequest, start
 	};
 	const batch = writeBatch(db);
 	batch.set(ref, plan);
-	batch.set(profileRef(uid), { activePlanId: plan.id, updatedAt: now() }, { merge: true });
+	// Die Bestwerte aus den Einstiegsfragen werden zu den Bestwerten im Profil.
+	batch.set(
+		profileRef(uid),
+		{ activePlanId: plan.id, bests: req.bests, bestsUpdatedAt: now(), updatedAt: now() },
+		{ merge: true }
+	);
 	await batch.commit();
 	return plan;
 }

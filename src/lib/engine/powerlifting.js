@@ -6,7 +6,9 @@ const EXERCISES = [
   ['Spoto Press','Brust','benchVar'],['Larsen Press','Brust','benchVar'],['Board Press','Brust','benchVar'],['Floor Press','Trizeps','benchVar'],
   ['Pin Squat','Kniebeuge','squatVar'],['Tempo Squat (3-0-0)','Kniebeuge','squatVar'],['Belt Squat','Quadrizeps','quads'],['Hack Squat','Quadrizeps','quads'],
   ['Konventionelles Kreuzheben','Kreuzheben','deadliftVar'],['Gestrecktes Kreuzheben','hintere Kette','hamstrings'],['Rückenstrecker (Hyperextension)','hintere Kette','hamstrings'],['Reverse Hyper','hintere Kette','hamstrings'],
-  ['Dips','Trizeps','triceps'],['JM Press','Trizeps','triceps'],['Reverse Flys','Schultern','shoulders'],['Bizepscurls','Bizeps','biceps'],['Hammercurls','Bizeps','biceps']
+  ['Dips','Trizeps','triceps'],['JM Press','Trizeps','triceps'],['Reverse Flys','Schultern','shoulders'],['Bizepscurls','Bizeps','biceps'],['Hammercurls','Bizeps','biceps'],
+  // v2: für Splits ohne Langhantel-Fokus
+  ['Kabelrudern','Rücken','back'],['Kurzhantel-Schulterdrücken','Schultern','shoulders'],['Ausfallschritte','Quadrizeps','quads'],['Butterfly','Brust','chest']
 ].map(([name, group, category]) => (category ? { name, group, category } : { name, group }));
 const TRAINING_CATS = [['squatMain','Main Lift · Squat'],['squatVar','Squat-Assistenz'],['benchMain','Main Lift · Bench'],['benchVar','Bench-Assistenz'],['deadliftMain','Main Lift · Deadlift'],['deadliftVar','Deadlift-Assistenz'],['back','Assistenz · Rücken'],['chest','Assistenz · Brust'],['triceps','Assistenz · Trizeps'],['shoulders','Assistenz · Schultern'],['quads','Assistenz · Quadrizeps'],['hamstrings','Assistenz · hintere Kette'],['core','Assistenz · Core'],['calves','Assistenz · Waden'],['biceps','Assistenz · Bizeps']];
 const CAT_LABEL = Object.fromEntries(TRAINING_CATS);
@@ -391,5 +393,5 @@ function inCurrentCycle(entry, plan) { return belongsToPlan(entry, plan) && entr
 
 export {
   LOAD_MODEL, rpePercent, e1rmFromSet, expectedMax, plannedLoad, applyPlannedLoadsToPlan, updateMaxFromSet, rebaseMaxesForNewCycle, migratePlanLoadModel, defaultProgression, maxSetsPerExposure, EXERCISES, TRAINING_CATS, CAT_LABEL, LIFTS, esc, parseKg, sameKg, roundKg, estimateOneRmFrom3x3, categoryInCatalog, templateCycleWeeks, templateSchedule, phaseRpeTargets, buildWeekSets, calcLoad, generatePlan, sanitizePlan, belongsToPlan, inCurrentCycle,
-  WEEKDAYS, LEVELS, PHASES, ROUNDING_STEPS, DEADLIFT_STANCES, applyPlannedLoads
+  WEEKDAYS, LEVELS, PHASES, ROUNDING_STEPS, DEADLIFT_STANCES, applyPlannedLoads, roundTo
 };

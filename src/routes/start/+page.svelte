@@ -1,50 +1,82 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { session } from '#lib/data/session.svelte.ts';
-	import type { Experience, Goal, MainLift, PlanRequest } from '#lib/data/types.ts';
-	import { LIFT_LABEL } from '#lib/engine/index.ts';
+	import type { Bests, Block, Experience, Goal, MainLift, PlanRequest } from '#lib/data/types.ts';
+	import {
+		BLOCK_LABEL,
+		DAYS_FOR_GOAL,
+		GOAL_LABEL,
+		LIFT_LABEL,
+		hasBlocks,
+		kg,
+		liftsForGoal,
+		splitLabel
+	} from '#lib/engine/index.ts';
+	import BestField from '#lib/ui/BestField.svelte';
 	import Icon from '#lib/ui/Icon.svelte';
 
 	// Die Antworten bilden ein PlanRequest. Später füllt der KI-Coach dasselbe Objekt.
-	let goal = $state<Goal | null>(null);
-	let days = $state<2 | 3 | 4 | 5 | null>(null);
-	let experience = $state<Experience | null>(null);
-	let focus = $state<MainLift | null>(null);
-	let stance = $state<'conventional' | 'sumo'>('conventional');
-	let lifts = $state<Record<MainLift, string>>({ squat: '', bench: '', deadlift: '' });
+	// Bei einem Folgeplan sind die letzten Antworten vorausgefüllt.
+	const prev = session.plan?.request ?? null;
+	let goal = $state<Goal | null>(prev?.goal ?? null);
+	let block = $state<Block>(prev?.block === 'hypertrophy' ? 'strength' : prev?.block === 'strength' ? 'hypertrophy' : 'hypertrophy');
+	let days = $state<number | null>(prev?.daysPerWeek ?? null);
+	let experience = $state<Experience | null>(prev?.experience ?? null);
+	let focus = $state<Exclude<MainLift, 'press'>>(prev?.focus ?? 'squat');
+	let stance = $state<'conventional' | 'sumo'>(prev?.deadliftStance ?? 'conventional');
+	const known = session.profile?.bests ?? {};
+	let bests = $state<Record<MainLift, number | null>>({
+		squat: known.squat ?? null,
+		bench: known.bench ?? null,
+		deadlift: known.deadlift ?? null,
+		press: known.press ?? null
+	});
 
 	let step = $state(0);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 
-	const STEPS = ['goal', 'days', 'experience', 'lifts', 'focus'] as const;
-	const current = $derived(STEPS[step]);
-	const parse = (v: string) => Number(String(v).replace(',', '.'));
-	const liftsValid = $derived((['squat', 'bench', 'deadlift'] as MainLift[]).every((l) => parse(lifts[l]) >= 10 && parse(lifts[l]) <= 500));
+	type Step = 'goal' | 'block' | 'days' | 'experience' | 'bests' | 'focus' | 'summary';
+	const steps = $derived<Step[]>([
+		'goal',
+		...(goal && hasBlocks(goal) ? (['block'] as Step[]) : []),
+		'days',
+		'experience',
+		'bests',
+		...(goal === 'powerlifting' ? (['focus'] as Step[]) : []),
+		'summary'
+	]);
+	const current = $derived(steps[Math.min(step, steps.length - 1)]);
+	const lifts = $derived(goal ? liftsForGoal(goal) : []);
+	const dayOptions = $derived(goal ? DAYS_FOR_GOAL[goal] : []);
+	const enteredBests = $derived(lifts.filter((l) => bests[l] != null));
 
-	function choose<T>(set: (v: T) => void, value: T) {
-		set(value);
-		next();
-	}
 	function next() {
-		if (step < STEPS.length - 1) step++;
+		if (step < steps.length - 1) step++;
 	}
 	function back() {
 		if (step > 0) step--;
-		else history.length > 1 ? history.back() : goto('/');
+		else if (history.length > 1) history.back();
+		else goto('/');
+	}
+	function chooseGoal(g: Goal) {
+		goal = g;
+		if (days != null && !DAYS_FOR_GOAL[g].includes(days)) days = null;
+		next();
 	}
 
 	async function create() {
-		if (!session.user || !goal || !days || !experience || !focus || !liftsValid) return;
+		if (!session.user || !goal || !days || !experience) return;
 		busy = true;
 		error = null;
+		const chosen: Bests = Object.fromEntries(lifts.map((l) => [l, bests[l]]));
 		const req: PlanRequest = {
 			goal,
-			daysPerWeek: days,
+			daysPerWeek: days as PlanRequest['daysPerWeek'],
 			experience,
-			focus,
-			deadliftStance: stance,
-			working3RM: { squat: parse(lifts.squat), bench: parse(lifts.bench), deadlift: parse(lifts.deadlift) }
+			bests: chosen,
+			...(hasBlocks(goal) ? { block } : {}),
+			...(goal === 'powerlifting' ? { focus, deadliftStance: stance } : {})
 		};
 		try {
 			await session.createPlan(req);
@@ -56,10 +88,15 @@
 		}
 	}
 
-	const GOALS: { value: Goal; label: string; hint: string }[] = [
-		{ value: 'strength', label: 'Stärker werden', hint: 'Schwerere Gewichte in den großen Grundübungen' },
-		{ value: 'hypertrophy', label: 'Muskeln aufbauen', hint: 'Mehr Volumen, etwas mehr Wiederholungen' },
-		{ value: 'powerlifting', label: 'Powerlifting', hint: 'Kniebeuge, Bankdrücken, Kreuzheben für den Wettkampf' }
+	const GOALS: { value: Goal; hint: string }[] = [
+		{ value: 'hypertrophy', hint: 'Muskeln aufbauen, Bodybuilding-Stil, alle Muskelgruppen' },
+		{ value: 'strength', hint: 'Stärker werden in Kniebeuge, Bankdrücken, Kreuzheben und Schulterdrücken' },
+		{ value: 'powerlifting', hint: 'Wettkampf in Kniebeuge, Bankdrücken und Kreuzheben' },
+		{ value: 'fitness', hint: 'Fit und gesund bleiben, moderate Gewichte, wenig Zeitaufwand' }
+	];
+	const BLOCKS: { value: Block; hint: string }[] = [
+		{ value: 'hypertrophy', hint: 'Mehr Wiederholungen und Sätze. Baut Muskelmasse als Basis für späteren Kraftzuwachs.' },
+		{ value: 'strength', hint: 'Weniger Wiederholungen, schwerere Gewichte. Macht aus Muskelmasse Maximalkraft.' }
 	];
 	const LEVELS: { value: Experience; label: string; hint: string }[] = [
 		{ value: 'beginner', label: 'Einsteiger', hint: 'Unter einem Jahr regelmäßiges Krafttraining' },
@@ -71,27 +108,56 @@
 <main class="page">
 	<header class="top">
 		<button class="icon" onclick={back} aria-label="Zurück"><Icon name="back" /></button>
-		<div class="progress" aria-label="Schritt {step + 1} von {STEPS.length}">
-			{#each STEPS as s, i (s)}<i class:on={i <= step}></i>{/each}
+		<div class="progress" aria-label="Schritt {step + 1} von {steps.length}">
+			{#each steps as s, i (s)}<i class:on={i <= step}></i>{/each}
 		</div>
-		<span class="count muted num">{step + 1}/{STEPS.length}</span>
+		<span class="count muted num">{step + 1}/{steps.length}</span>
 	</header>
 
 	{#if current === 'goal'}
 		<h1 class="title">Was ist dein Ziel?</h1>
 		<div class="options">
 			{#each GOALS as g (g.value)}
-				<button class="opt tile" class:sel={goal === g.value} onclick={() => choose((v) => (goal = v), g.value)}>
-					<b>{g.label}</b><span>{g.hint}</span>
+				<button class="opt tile" class:sel={goal === g.value} onclick={() => chooseGoal(g.value)}>
+					<b>{GOAL_LABEL[g.value]}</b><span>{g.hint}</span>
+				</button>
+			{/each}
+		</div>
+	{:else if current === 'block'}
+		<h1 class="title">Welcher Block?</h1>
+		<p class="muted hint">
+			Gute Programme wechseln zwischen Aufbau- und Kraftblöcken. {prev?.block
+				? `Nach deinem ${BLOCK_LABEL[prev.block]} ist jetzt der andere dran.`
+				: 'Wenn du unsicher bist, fang mit dem Aufbaublock an.'}
+		</p>
+		<div class="options">
+			{#each BLOCKS as b (b.value)}
+				<button
+					class="opt tile"
+					class:sel={block === b.value}
+					onclick={() => {
+						block = b.value;
+						next();
+					}}
+				>
+					<b>{BLOCK_LABEL[b.value]}</b><span>{b.hint}</span>
 				</button>
 			{/each}
 		</div>
 	{:else if current === 'days'}
 		<h1 class="title">Wie oft pro Woche kannst du trainieren?</h1>
-		<div class="grid4">
-			{#each [2, 3, 4, 5] as const as d (d)}
-				<button class="opt tile num-opt" class:sel={days === d} onclick={() => choose((v) => (days = v), d)}>
-					<b class="display num">{d}</b><span>Tage</span>
+		<div class="options">
+			{#each dayOptions as d (d)}
+				<button
+					class="opt tile row-opt"
+					class:sel={days === d}
+					onclick={() => {
+						days = d;
+						next();
+					}}
+				>
+					<b class="display num">{d}</b>
+					<span><b class="plain">{d} Tage</b>{goal ? splitLabel(goal, d) : ''}</span>
 				</button>
 			{/each}
 		</div>
@@ -100,35 +166,32 @@
 		<h1 class="title">Wie lange trainierst du schon?</h1>
 		<div class="options">
 			{#each LEVELS as l (l.value)}
-				<button class="opt tile" class:sel={experience === l.value} onclick={() => choose((v) => (experience = v), l.value)}>
+				<button
+					class="opt tile"
+					class:sel={experience === l.value}
+					onclick={() => {
+						experience = l.value;
+						next();
+					}}
+				>
 					<b>{l.label}</b><span>{l.hint}</span>
 				</button>
 			{/each}
 		</div>
-	{:else if current === 'lifts'}
-		<h1 class="title">Was bewegst du gerade?</h1>
+	{:else if current === 'bests'}
+		<h1 class="title">Deine Bestwerte</h1>
 		<p class="muted hint">
-			Das Gewicht, mit dem du <b>3 saubere Wiederholungen</b> schaffst, mit noch ein bis zwei Wiederholungen Luft. Grob reicht, der Plan passt sich nach jedem Training an.
+			Dein Maximum für eine Wiederholung. Daraus berechnet der Plan jedes Gewicht. Übungen, die du nicht kennst oder nicht
+			machst, lässt du leer; dort trägst du im ersten Training dein Gewicht selbst ein.
 		</p>
 		<div class="tile fields">
-			{#each ['squat', 'bench', 'deadlift'] as const as l (l)}
-				<label class="field">
-					<span>{LIFT_LABEL[l]}</span>
-					<span class="input">
-						<input
-							id="lift-{l}"
-							inputmode="decimal"
-							placeholder="0"
-							bind:value={lifts[l]}
-							class="display num"
-							autocomplete="off"
-						/>
-						<small>kg</small>
-					</span>
-				</label>
+			{#each lifts as l (l)}
+				<BestField id="best-{l}" label={LIFT_LABEL[l]} bind:value={bests[l]} />
 			{/each}
 		</div>
-		<button class="cta" onclick={next} disabled={!liftsValid}><span>Weiter</span></button>
+		<button class="cta" onclick={next}>
+			<span>{enteredBests.length ? 'Weiter' : 'Ohne Bestwerte weiter'}</span>
+		</button>
 	{:else if current === 'focus'}
 		<h1 class="title">Welche Übung soll am meisten wachsen?</h1>
 		<div class="options">
@@ -138,16 +201,38 @@
 				</button>
 			{/each}
 		</div>
-		{#if goal === 'powerlifting'}
-			<div class="stance">
-				<span class="muted">Kreuzheben ziehst du</span>
-				<div class="seg tile">
-					<button class:sel={stance === 'conventional'} onclick={() => (stance = 'conventional')}>konventionell</button>
-					<button class:sel={stance === 'sumo'} onclick={() => (stance = 'sumo')}>sumo</button>
-				</div>
+		<div class="stance">
+			<span class="muted">Kreuzheben ziehst du</span>
+			<div class="seg tile">
+				<button class:sel={stance === 'conventional'} onclick={() => (stance = 'conventional')}>konventionell</button>
+				<button class:sel={stance === 'sumo'} onclick={() => (stance = 'sumo')}>sumo</button>
 			</div>
-		{/if}
-		<button class="cta" onclick={create} disabled={!focus || busy}>
+		</div>
+		<button class="cta" onclick={next}><span>Weiter</span></button>
+	{:else if current === 'summary' && goal && days && experience}
+		<h1 class="title">Dein Plan</h1>
+		<section class="tile summary">
+			<div class="srow"><span class="muted">Ziel</span><b>{GOAL_LABEL[goal]}</b></div>
+			{#if hasBlocks(goal)}
+				<div class="srow"><span class="muted">Block</span><b>{BLOCK_LABEL[block]}</b></div>
+			{/if}
+			<div class="srow">
+				<span class="muted">Woche</span><b>{days} Tage · {splitLabel(goal, days)}</b>
+			</div>
+			<div class="srow">
+				<span class="muted">Erfahrung</span><b>{LEVELS.find((l) => l.value === experience)?.label}</b>
+			</div>
+			<div class="srow">
+				<span class="muted">Bestwerte</span>
+				<b class="num">
+					{enteredBests.length
+						? enteredBests.map((l) => `${LIFT_LABEL[l]} ${kg(bests[l])}`).join(' · ')
+						: 'werden im ersten Training geschätzt'}
+				</b>
+			</div>
+		</section>
+		<p class="muted hint">Alles lässt sich später ändern: Übungen im Plan, Bestwerte im Profil.</p>
+		<button class="cta" onclick={create} disabled={busy}>
 			<span>{busy ? 'Plan wird erstellt …' : 'Plan erstellen'}</span>
 		</button>
 		{#if error}<p class="err" role="alert">{error}</p>{/if}
@@ -218,66 +303,31 @@
 			inset 0 0 0 2px var(--ac),
 			var(--glass-edge);
 	}
-	.grid4 {
-		display: grid;
-		grid-template-columns: repeat(4, 1fr);
-		gap: 10px;
-	}
-	.num-opt {
+	.row-opt {
+		flex-direction: row;
 		align-items: center;
-		padding: 18px 0 14px;
+		gap: 18px;
+		padding: 14px 20px;
 	}
-	.num-opt b {
-		font-size: 52px;
+	.row-opt .display {
+		font-size: 44px;
+		width: 1ch;
+	}
+	.row-opt span {
+		display: flex;
+		flex-direction: column;
+	}
+	.row-opt .plain {
+		color: var(--tx);
+		font-size: 16px;
 	}
 	.hint {
 		margin: 0;
 		font-size: 15px;
-		max-width: 40ch;
-	}
-	.hint b {
-		color: var(--tx);
-		font-weight: 600;
+		max-width: 44ch;
 	}
 	.fields {
-		padding: 4px 18px;
-	}
-	.field {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 12px;
-		padding: 10px 0;
-		border-bottom: 1px solid var(--sf2);
-	}
-	.field:last-child {
-		border: 0;
-	}
-	.field > span:first-child {
-		font-weight: 600;
-	}
-	.input {
-		display: flex;
-		align-items: baseline;
-		gap: 6px;
-	}
-	.input input {
-		width: 4.2ch;
-		text-align: right;
-		font-size: 44px;
-		background: transparent;
-		border: 0;
-		color: var(--ac-ink);
-		padding: 0;
-	}
-	.input input::placeholder {
-		color: var(--sf2);
-	}
-	.input input:focus {
-		outline: none;
-	}
-	.input small {
-		color: var(--mu);
+		padding: 0 18px;
 	}
 	.stance {
 		display: flex;
@@ -299,6 +349,24 @@
 	.seg button.sel {
 		background: var(--ac);
 		color: var(--on-ac);
+	}
+	.summary {
+		padding: 4px 18px;
+	}
+	.srow {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 16px;
+		padding: 13px 0;
+		border-bottom: 1px solid var(--sf2);
+	}
+	.srow:last-child {
+		border: 0;
+	}
+	.srow b {
+		text-align: right;
+		font-weight: 600;
 	}
 	.err {
 		color: var(--danger);

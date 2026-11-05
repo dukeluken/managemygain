@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { session } from '#lib/data/session.svelte.ts';
 	import {
-		LIFTS,
+		programLifts,
+		BLOCK_LABEL,
 		LIFT_LABEL,
+		blockOf,
 		WEEKDAY_LONG,
 		WEEKDAY_SHORT,
 		dayPrescription,
@@ -56,14 +58,17 @@
 	const series = $derived(plan ? progressSeries(plan, session.workouts) : null);
 	const progress = $derived(
 		plan && series
-			? LIFTS.map((lift) => {
-					const values = series[lift].map((p) => p.value);
+			? programLifts(plan.program).map((lift) => {
+					const values = (series[lift] ?? []).map((p) => p.value);
 					const current = values.length ? values[values.length - 1] : estimatedMax(plan.program, lift, weekIndex);
 					const start = values[0] ?? current;
 					return { lift, values, current, delta: current != null && start != null ? current - start : 0 };
 				}).filter((p) => p.current != null)
 			: []
 	);
+
+	const block = $derived(plan ? blockOf(plan) : null);
+	const nextBlock = $derived(block === 'hypertrophy' ? 'strength' : 'hypertrophy');
 
 	// Zuletzt
 	const last = $derived(
@@ -97,9 +102,13 @@
 		<p class="muted lead">Dein Plan startet am Montag, {parseIsoDate(plan.startDate).toLocaleDateString('de-DE')}.</p>
 	{:else if !inPlan}
 		<section class="tile card">
-			<div class="label"><b>Block geschafft</b></div>
-			<p class="muted">{weeks} Wochen durchgezogen. Der nächste Block baut auf deinen neuen Bestwerten auf.</p>
-			<a class="cta" href="/start"><span>Neuen Plan erstellen</span></a>
+			<div class="label"><b>{block ? `${BLOCK_LABEL[block]} geschafft` : 'Plan geschafft'}</b></div>
+			<p class="muted">
+				{weeks} Wochen durchgezogen.{block && (plan.goal === 'strength' || plan.goal === 'powerlifting')
+					? ` Als Nächstes passt ein ${BLOCK_LABEL[nextBlock]}.`
+					: ''} Prüfe vorher deine Bestwerte im Profil.
+			</p>
+			<a class="cta" href="/start"><span>Nächsten Block planen</span></a>
 		</section>
 	{:else}
 		<!-- Nächstes Training -->
@@ -119,7 +128,8 @@
 					{#if hero?.weight}
 						<div class="hero-num">
 							<span class="display num">{kg(hero.weight)}</span>
-							<small class="muted">kg · {hero.sets} × {hero.reps}</small>
+							<small class="muted">kg · {hero.exercise}</small>
+							<small class="muted">{hero.sets} × {hero.reps} Wdh.</small>
 						</div>
 					{/if}
 				</div>
@@ -147,7 +157,7 @@
 				</div>
 			</section>
 			<a class="tile small" href="/plan" aria-label="Block, zum Plan">
-				<div class="label"><span class="muted">Block</span></div>
+				<div class="label"><span class="muted">{block ? BLOCK_LABEL[block] : 'Plan'}</span></div>
 				<div class="figure"><span class="display num">{weekIndex + 1}</span><small class="muted">von {weeks} Wochen</small></div>
 				<div class="bar" aria-hidden="true">
 					{#each Array.from({ length: weeks }, (_, i) => i) as i (i)}

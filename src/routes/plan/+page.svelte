@@ -4,6 +4,9 @@
 		WEEKDAY_LONG,
 		WEEKDAY_SHORT,
 		WEEK_ORDER,
+		BLOCK_LABEL,
+		blockDescription,
+		blockOf,
 		addExercise,
 		dayPrescription,
 		dayTitle,
@@ -62,7 +65,9 @@
 		<div>
 			<h1 class="title">Woche {week + 1}</h1>
 			<p class="muted sub">
-				{isDeload(plan.program, week) ? 'Entlastungswoche · weniger Sätze, leichtere Gewichte' : 'Aufbau'}{nextDeload != null &&
+				{isDeload(plan.program, week)
+					? 'Entlastungswoche · weniger Sätze, leichtere Gewichte'
+					: (blockOf(plan) ? BLOCK_LABEL[blockOf(plan)!] : 'Training')}{nextDeload != null &&
 				!isDeload(plan.program, week)
 					? ` · Entlastung in Woche ${nextDeload + 1}`
 					: ''}
@@ -125,7 +130,7 @@
 				{/if}
 			{/each}
 		</section>
-		<p class="muted hint">Tippe auf einen Tag und dann auf eine Übung, um sie zu ändern.</p>
+		<p class="muted hint">{blockDescription(plan)}. Tippe auf einen Tag und dann auf eine Übung, um sie zu ändern.</p>
 	{/if}
 </main>
 

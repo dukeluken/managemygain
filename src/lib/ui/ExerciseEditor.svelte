@@ -7,7 +7,7 @@
 		editExercise,
 		exerciseCatalog,
 		kg,
-		liftOfCategory,
+		hasCalculatedLoad,
 		moveExercise,
 		prescribe,
 		removeExercise,
@@ -34,7 +34,7 @@
 			ex,
 			p: prescribe(ex, week),
 			weeks: weekCount(program),
-			isLift: liftOfCategory(ex.category) !== null,
+			isLift: hasCalculatedLoad(ex),
 			overridden: Boolean(ex.weekWeightOverrides?.[week]),
 			count: program.days[dayIndex].exercises.length
 		};

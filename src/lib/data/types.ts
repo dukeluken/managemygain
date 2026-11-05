@@ -22,23 +22,34 @@ export interface Profile {
 	coachId: string | null;
 	/** Anstrengung als leicht/okay/hart (einfach) oder als RPE-Zahl (für Erfahrene). */
 	effortScale: 'simple' | 'rpe';
+	/** Eigene Bestwerte (1 Wiederholung, kg). Grundlage für alle Gewichte im Plan. */
+	bests?: Bests;
+	bestsUpdatedAt?: string;
 	createdAt: string;
 	updatedAt: string;
 }
 
-export type Goal = 'powerlifting' | 'strength' | 'hypertrophy';
+/** Ziel bzw. Sportart. */
+export type Goal = 'hypertrophy' | 'strength' | 'powerlifting' | 'fitness';
+/** Art des Blocks: Aufbau (Hypertrophie, mehr Wiederholungen) oder Kraft (schwerer). */
+export type Block = 'hypertrophy' | 'strength';
 export type Experience = 'beginner' | 'intermediate' | 'advanced';
-export type MainLift = 'squat' | 'bench' | 'deadlift';
+/** Grundübungen mit Bestwert. press = Schulterdrücken (stehend, Langhantel). */
+export type MainLift = 'squat' | 'bench' | 'deadlift' | 'press';
+export type Bests = Partial<Record<MainLift, number | null>>;
 
 /** Eingabe für die Planerzeugung. Heute aus dem Formular, später aus dem KI-Gespräch. */
 export interface PlanRequest {
 	goal: Goal;
-	daysPerWeek: 2 | 3 | 4 | 5;
+	/** Nur bei Kraft und Powerlifting wählbar; Muskelaufbau ist immer Hypertrophie. */
+	block?: Block;
+	daysPerWeek: 2 | 3 | 4 | 5 | 6;
 	experience: Experience;
-	focus: MainLift;
-	/** Arbeitsgewicht für 3 saubere Wiederholungen je Hauptübung in kg. */
-	working3RM: Record<MainLift, number>;
-	deadliftStance: 'conventional' | 'sumo';
+	/** Bestwerte (1 Wdh., kg). Fehlende werden aus dem ersten Training geschätzt. */
+	bests: Bests;
+	/** Nur Powerlifting: Schwerpunkt und Kreuzheben-Stil. */
+	focus?: Exclude<MainLift, 'press'>;
+	deadliftStance?: 'conventional' | 'sumo';
 	weeks?: number;
 }
 
@@ -56,22 +67,34 @@ export interface ProgramExercise {
 	weekWeights: (number | '')[];
 	weekWeightOverrides: boolean[];
 	note: string;
+	/** Anteil am Bestwert der Grundübung (1 = Grundübung). null = kein vorgegebenes Gewicht. */
+	loadFactor?: number | null;
+	/** Rolle im Tag: Grundübung, Volumen der Grundübung, Ergänzung, Isolation. */
+	role?: 'main' | 'volume' | 'secondary' | 'accessory';
 	[key: string]: unknown;
 }
 
 export interface ProgramDay {
 	name: string;
+	/** Anzeigename, z. B. „Oberkörper A“. Fehlt bei Powerlifting-Plänen (dort aus den Hauptübungen). */
+	title?: string;
 	/** 0 = Sonntag … 6 = Samstag */
 	weekDay: number;
 	exercises: ProgramExercise[];
 }
 
-/** Das von der Engine erzeugte Programm (Format der Powerlifting-Engine). */
+/** Das erzeugte Programm. */
 export interface Program {
 	cycleWeeks: number;
 	weekTypes: ('regular' | 'deload')[];
 	days: ProgramDay[];
-	maxes: Record<MainLift, number | ''>;
+	/** Bestwert-Grundlage je Grundübung und Woche, ab der sie gilt. */
+	maxes: Partial<Record<MainLift, number | ''>>;
+	maxAnchor?: Partial<Record<MainLift, number>>;
+	/** Erwartete Steigerung des 1RM pro Woche in kg. */
+	weeklyProgression?: Partial<Record<MainLift, number>>;
+	/** Kleinster Gewichtssprung in kg. */
+	rounding?: number;
 	[key: string]: unknown;
 }
 
@@ -86,10 +109,10 @@ export interface Plan {
 	startDate: string;
 	status: 'active' | 'archived';
 	request: PlanRequest | null;
-	engine: 'powerlifting-v2';
+	engine: 'powerlifting-v2' | 'splits-v1';
 	program: Program;
 	/** Geschätzte Bestwerte beim Erstellen, Ausgangspunkt für den Fortschritt. */
-	startMaxes?: Record<MainLift, number | null>;
+	startMaxes?: Partial<Record<MainLift, number | null>>;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -125,5 +148,5 @@ export interface Workout {
 	finishedAt: string | null;
 	exercises: LoggedExercise[];
 	/** Geschätzte Bestwerte nach dem Training (für den Fortschrittsverlauf). */
-	estimates?: Record<MainLift, number | null>;
+	estimates?: Partial<Record<MainLift, number | null>>;
 }

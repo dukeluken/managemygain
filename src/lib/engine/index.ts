@@ -1,17 +1,25 @@
 // Brücke zwischen Engine und App: alles, was Bildschirme über einen Plan wissen
 // müssen, als reine Funktionen (ohne Firebase, ohne DOM).
+//
+// Zwei Engines erzeugen Programme im selben Format:
+//   - powerlifting.js (aus v1): Kniebeuge/Bankdrücken/Kreuzheben, Wettkampf-Logik
+//   - splits.ts: Muskelaufbau, allgemeine Kraft, Fitness
+// Gewichte rechnet für beide loads.ts aus den Bestwerten.
 import * as engine from './powerlifting.js';
-// Die Engine ist (noch) JavaScript ohne Typen; hier die genutzten Signaturen.
-const pl = engine as unknown as {
-	generatePlan(options: Record<string, unknown>): unknown;
-	updateMaxFromSet(program: Program, lift: MainLift, weight: number, reps: number, rpe: number, weekIndex: number): boolean;
-	applyPlannedLoadsToPlan(program: Program, fromWeek: number, lift?: MainLift | null): void;
-	applyPlannedLoads(program: Program, exercise: ProgramExercise, fromWeek: number): void;
-	expectedMax(program: Program, lift: MainLift, weekIndex: number): number | null;
-	EXERCISES: { name: string; group: string; category?: string }[];
-	categoryInCatalog(name: string): string;
-};
+import {
+	ALL_LIFTS,
+	applyLoads,
+	applyLoadsToProgram,
+	expectedMax,
+	loadRef,
+	setMaxes,
+	updateMax
+} from './loads.ts';
+import { generateSplitProgram, phaseFor } from './splits.ts';
 import type {
+	Bests,
+	Block,
+	Experience,
 	Feel,
 	Goal,
 	MainLift,
@@ -23,16 +31,51 @@ import type {
 	Workout
 } from '#lib/data/types.ts';
 
+// Die Powerlifting-Engine ist JavaScript ohne Typen; hier die genutzten Signaturen.
+const pl = engine as unknown as {
+	generatePlan(options: Record<string, unknown>): unknown;
+	rpePercent(reps: number, rpe: number): number;
+	EXERCISES: { name: string; group: string; category?: string }[];
+	categoryInCatalog(name: string): string;
+};
+
+export { ALL_LIFTS, loadRef } from './loads.ts';
+export { DAYS_FOR_GOAL, splitLabel } from './splits.ts';
+export { e1rm } from './loads.ts';
+
 export const LIFT_LABEL: Record<MainLift, string> = {
 	squat: 'Kniebeuge',
 	bench: 'Bankdrücken',
-	deadlift: 'Kreuzheben'
+	deadlift: 'Kreuzheben',
+	press: 'Schulterdrücken'
+};
+
+export const GOAL_LABEL: Record<Goal, string> = {
+	hypertrophy: 'Muskelaufbau',
+	strength: 'Kraft',
+	powerlifting: 'Powerlifting',
+	fitness: 'Fitness'
+};
+
+export const BLOCK_LABEL: Record<Block, string> = {
+	hypertrophy: 'Aufbaublock',
+	strength: 'Kraftblock'
 };
 
 export const WEEKDAY_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
 export const WEEKDAY_LONG = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
 /** Anzeigereihenfolge der Woche: Montag zuerst. */
 export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+/** Bei welchen Zielen es Blöcke zur Auswahl gibt. */
+export function hasBlocks(goal: Goal): boolean {
+	return goal === 'strength' || goal === 'powerlifting';
+}
+
+/** Welche Bestwerte für ein Ziel abgefragt werden. */
+export function liftsForGoal(goal: Goal): MainLift[] {
+	return goal === 'powerlifting' ? ['squat', 'bench', 'deadlift'] : ALL_LIFTS;
+}
 
 // ---------- Plan erzeugen ----------
 
@@ -44,34 +87,51 @@ const PLAIN_NAMES: Record<string, string> = {
 };
 
 export function createProgram(req: PlanRequest): Program {
-	const program = generate(req);
-	if (req.goal !== 'powerlifting') {
-		program.days.forEach((day) =>
-			day.exercises.forEach((ex) => {
-				ex.exercise = PLAIN_NAMES[ex.exercise] ?? ex.exercise;
-			})
-		);
-	}
+	if (req.goal !== 'powerlifting') return generateSplitProgram(req);
+	const block = req.block ?? 'strength';
+	// Die Powerlifting-Engine erwartet 3er-Gewichte bei RPE 8; danach setzen wir die
+	// Bestwerte exakt und rechnen alle Gewichte mit dem gemeinsamen Lastmodell.
+	const triples = Object.fromEntries(
+		(['squat', 'bench', 'deadlift'] as const).map((l) => [l, (req.bests[l] ?? 0) * pl.rpePercent(3, 8)])
+	);
+	const program = pl.generatePlan({
+		frequency: req.daysPerWeek,
+		level: req.experience,
+		focus: req.focus ?? 'squat',
+		phase: block,
+		cycleWeeks: req.weeks,
+		triples,
+		name: '',
+		deadliftStance: req.deadliftStance ?? 'conventional'
+	}) as Program;
+	program.engine = 'powerlifting-v2';
+	program.goal = 'powerlifting';
+	setMaxes(
+		program,
+		{ squat: req.bests.squat ?? null, bench: req.bests.bench ?? null, deadlift: req.bests.deadlift ?? null },
+		0,
+		req.experience
+	);
 	return program;
 }
 
-function generate(req: PlanRequest): Program {
-	const phase = req.goal === 'hypertrophy' ? 'hypertrophy' : 'strength';
-	return pl.generatePlan({
-		frequency: req.daysPerWeek,
-		level: req.experience,
-		focus: req.focus,
-		phase,
-		cycleWeeks: req.weeks,
-		triples: req.working3RM,
-		name: '',
-		deadliftStance: req.deadliftStance
-	}) as Program;
+export function planName(req: PlanRequest): string {
+	const goal = GOAL_LABEL[req.goal];
+	if (hasBlocks(req.goal)) return `${goal} · ${BLOCK_LABEL[req.block ?? 'strength']}`;
+	return `${goal} · ${req.daysPerWeek} Tage`;
 }
 
-export function planName(req: PlanRequest): string {
-	const goal = { powerlifting: 'Powerlifting', strength: 'Kraft', hypertrophy: 'Muskelaufbau' }[req.goal];
-	return `${goal} · ${req.daysPerWeek} Tage`;
+/** Blockart eines Plans (für Anzeige), oder null. */
+export function blockOf(plan: Pick<Plan, 'goal' | 'request'>): Block | null {
+	if (!hasBlocks(plan.goal)) return plan.goal === 'hypertrophy' ? 'hypertrophy' : null;
+	return plan.request?.block ?? 'strength';
+}
+
+export function blockDescription(plan: Pick<Plan, 'goal' | 'request'>): string {
+	const phase = phaseFor(plan.goal, plan.request?.block);
+	if (phase === 'fitness') return 'Moderate Gewichte, saubere Technik, regelmäßig dranbleiben';
+	if (phase === 'hypertrophy') return 'Mehr Wiederholungen und Sätze für Muskelmasse';
+	return 'Weniger Wiederholungen, schwerere Gewichte';
 }
 
 // ---------- Datum und Woche ----------
@@ -148,6 +208,7 @@ export function dayPrescription(program: Program, weekIndex: number, dayIndex: n
 
 /** Lesbarer Titel aus den Hauptübungen des Tages, z. B. „Kniebeuge & Bankdrücken“. */
 export function dayTitle(day: ProgramDay): string {
+	if (day.title) return day.title;
 	const lifts = [...new Set(day.exercises.filter((e) => e.isMain && e.lift).map((e) => e.lift as MainLift))];
 	return lifts.length ? lifts.map((l) => LIFT_LABEL[l]).join(' & ') : day.name;
 }
@@ -193,17 +254,29 @@ export function weekSlots(plan: Plan, workouts: Workout[], weekIndex: number, to
 	const current = weekIndexAt(plan, today);
 	const next = weekIndex === current ? nextDayIndex(plan.program, workouts, weekIndex) : null;
 	const todayPos = WEEK_ORDER.indexOf(today.getDay());
-	return WEEK_ORDER.map((weekDay, pos) => {
+	// Einheiten vor dem Erstellen des Plans gelten nicht als verpasst.
+	const created = plan.createdAt ? isoDate(new Date(plan.createdAt)) : '';
+	const start = parseIsoDate(plan.startDate);
+	const slots = WEEK_ORDER.map((weekDay, pos) => {
 		const dayIndex = plan.program.days.findIndex((d) => d.weekDay === weekDay);
 		if (dayIndex < 0) return { weekDay, dayIndex: null, status: 'rest' as DayStatus, workout: null };
 		const workout = workoutFor(workouts, weekIndex, dayIndex);
+		const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + weekIndex * 7 + pos);
+		const beforePlan = isoDate(date) < created;
 		let status: DayStatus = 'planned';
 		if (workout?.finishedAt) status = 'done';
-		else if (weekIndex < current || (weekIndex === current && pos < todayPos && dayIndex !== next)) status = 'missed';
+		else if (
+			!beforePlan &&
+			(weekIndex < current || (weekIndex === current && pos < todayPos && dayIndex !== next))
+		)
+			status = 'missed';
 		else if (weekIndex === current && pos === todayPos) status = 'today';
 		else if (dayIndex === next) status = 'next';
 		return { weekDay, dayIndex, status, workout };
 	});
+	// Steht heute ein Training an, ist das „das Nächste“; sonst leuchten zwei Tage.
+	if (slots.some((s) => s.status === 'today')) slots.forEach((s) => s.status === 'next' && (s.status = 'planned'));
+	return slots;
 }
 
 // ---------- Anstrengung ----------
@@ -222,21 +295,25 @@ export function feelToRpe(feel: Feel, targetRpe: number): number {
 // ---------- Nach dem Training ----------
 
 /**
- * Passt das geschätzte 1RM aus den geloggten Sätzen der Wettkampfübungen an und
- * rechnet die folgenden Wochen neu. Gibt zurück, ob sich etwas geändert hat.
+ * Passt das geschätzte 1RM aus den geloggten Sätzen der Grundübungen an und
+ * rechnet die folgenden Wochen neu. Fehlt ein Bestwert, wird er hier zum ersten
+ * Mal geschätzt. Gibt zurück, ob sich etwas geändert hat.
  */
 export function applyWorkout(program: Program, workout: Workout): boolean {
 	let changed = false;
 	const day = program.days[workout.dayIndex];
+	const level = (program.level as Experience) ?? 'intermediate';
 	workout.exercises.forEach((logged, i) => {
 		const source = day?.exercises[i];
-		if (!logged.lift || !source || !String(source.category).endsWith('Main')) return;
+		if (!source || source.exercise !== logged.exercise) return;
+		const ref = loadRef(source);
+		if (!ref || ref.factor !== 1) return;
 		const best = logged.sets
 			.filter((s) => s.done && s.weight && s.reps && s.rpe)
 			.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))[0];
 		if (!best) return;
-		if (pl.updateMaxFromSet(program, logged.lift, best.weight!, best.reps!, best.rpe!, workout.weekIndex)) {
-			pl.applyPlannedLoadsToPlan(program, workout.weekIndex + 1, logged.lift);
+		if (updateMax(program, ref.lift, best.weight!, best.reps!, best.rpe!, workout.weekIndex, level)) {
+			applyLoadsToProgram(program, workout.weekIndex + 1, ref.lift);
 			changed = true;
 		}
 	});
@@ -245,18 +322,32 @@ export function applyWorkout(program: Program, workout: Workout): boolean {
 
 // ---------- Fortschritt ----------
 
-export const LIFTS: MainLift[] = ['squat', 'bench', 'deadlift'];
+/** Grundübungen, die im Programm vorkommen (in fester Reihenfolge). */
+export function programLifts(program: Program): MainLift[] {
+	const used = new Set<MainLift>();
+	program.days.forEach((d) => d.exercises.forEach((e) => {
+		const ref = loadRef(e);
+		if (ref) used.add(ref.lift);
+	}));
+	return ALL_LIFTS.filter((l) => used.has(l));
+}
 
 /** Geschätztes 1RM (1 Wiederholung) für eine Planwoche. */
 export function estimatedMax(program: Program, lift: MainLift, weekIndex: number): number | null {
-	return pl.expectedMax(program, lift, Math.max(0, weekIndex));
+	return expectedMax(program, lift, Math.max(0, weekIndex));
 }
 
-export function estimatesAt(program: Program, weekIndex: number): Record<MainLift, number | null> {
-	return Object.fromEntries(LIFTS.map((l) => [l, estimatedMax(program, l, weekIndex)])) as Record<
-		MainLift,
-		number | null
-	>;
+export function estimatesAt(program: Program, weekIndex: number): Partial<Record<MainLift, number | null>> {
+	return Object.fromEntries(programLifts(program).map((l) => [l, estimatedMax(program, l, weekIndex)]));
+}
+
+/** Eigene Bestwerte übernehmen: gelten ab `fromWeek`, Gewichte werden neu berechnet. */
+export function applyBests(program: Program, bests: Bests, fromWeek: number) {
+	const level = (program.level as Experience) ?? 'intermediate';
+	const relevant = Object.fromEntries(
+		Object.entries(bests).filter(([l]) => programLifts(program).includes(l as MainLift))
+	) as Bests;
+	setMaxes(program, relevant, fromWeek, level);
 }
 
 export interface ProgressPoint {
@@ -265,12 +356,12 @@ export interface ProgressPoint {
 }
 
 /** Verlauf je Hauptübung: Startwert des Plans, dann der Stand nach jedem Training. */
-export function progressSeries(plan: Plan, workouts: Workout[]): Record<MainLift, ProgressPoint[]> {
+export function progressSeries(plan: Plan, workouts: Workout[]): Partial<Record<MainLift, ProgressPoint[]>> {
 	const done = workouts
 		.filter((w) => w.finishedAt && w.estimates)
 		.sort((a, b) => String(a.finishedAt).localeCompare(String(b.finishedAt)));
 	return Object.fromEntries(
-		LIFTS.map((lift) => {
+		programLifts(plan.program).map((lift) => {
 			const points: ProgressPoint[] = [];
 			const start = plan.startMaxes?.[lift];
 			if (typeof start === 'number') points.push({ date: plan.startDate, value: start });
@@ -280,7 +371,7 @@ export function progressSeries(plan: Plan, workouts: Workout[]): Record<MainLift
 			}
 			return [lift, points];
 		})
-	) as Record<MainLift, ProgressPoint[]>;
+	) as Partial<Record<MainLift, ProgressPoint[]>>;
 }
 
 // ---------- Plan bearbeiten ----------
@@ -291,17 +382,9 @@ export interface CatalogItem {
 	category: string;
 }
 
-const LIFT_OF_CATEGORY: Record<string, MainLift> = {
-	squatMain: 'squat',
-	squatVar: 'squat',
-	benchMain: 'bench',
-	benchVar: 'bench',
-	deadliftMain: 'deadlift',
-	deadliftVar: 'deadlift'
-};
-
-export function liftOfCategory(category: string): MainLift | null {
-	return LIFT_OF_CATEGORY[category] ?? null;
+/** Hat die Übung ein aus den Bestwerten berechnetes Gewicht? */
+export function hasCalculatedLoad(ex: ProgramExercise): boolean {
+	return loadRef(ex) !== null;
 }
 
 /** Übungskatalog, mit Alltagsnamen außer bei Powerlifting. */
@@ -321,14 +404,13 @@ function fill<T>(list: T[] | undefined, length: number, value: T): T[] {
 
 /** Gewichte einer Übung ab einer Woche neu berechnen (eigene Werte bleiben). */
 function recompute(program: Program, ex: ProgramExercise, fromWeek: number) {
-	const weeks = weekCount(program);
-	ex.weekWeights = fill(ex.weekWeights, weeks, '');
-	ex.weekWeightOverrides = fill(ex.weekWeightOverrides, weeks, false);
-	if (liftOfCategory(ex.category)) {
-		pl.applyPlannedLoads(program, ex, fromWeek);
-	} else {
-		for (let i = Math.max(0, fromWeek); i < weeks; i++) if (!ex.weekWeightOverrides[i]) ex.weekWeights[i] = '';
-	}
+	applyLoads(program, ex, fromWeek);
+}
+
+/** Übung aus dem Katalog als Programm-Übung beschreiben (Bezug zum Bestwert). */
+function describe(item: CatalogItem) {
+	const ref = loadRef({ exercise: item.name, category: item.category, lift: null });
+	return { lift: ref?.lift ?? null, loadFactor: ref ? ref.factor : null };
 }
 
 export interface ExercisePatch {
@@ -371,10 +453,12 @@ export function editExercise(
 export function swapExercise(program: Program, dayIndex: number, exIndex: number, item: CatalogItem, fromWeek: number) {
 	const ex = program.days[dayIndex]?.exercises[exIndex];
 	if (!ex) return;
+	const { lift, loadFactor } = describe(item);
 	ex.exercise = item.name;
 	ex.category = item.category;
-	ex.lift = liftOfCategory(item.category);
-	ex.isMain = ex.lift !== null;
+	ex.lift = lift;
+	ex.loadFactor = loadFactor;
+	ex.isMain = loadFactor === 1;
 	ex.weekWeightOverrides = fill([], weekCount(program), false);
 	recompute(program, ex, fromWeek);
 }
@@ -383,16 +467,18 @@ export function addExercise(program: Program, dayIndex: number, item: CatalogIte
 	const day = program.days[dayIndex];
 	if (!day) return;
 	const weeks = weekCount(program);
-	const lift = liftOfCategory(item.category);
+	const { lift, loadFactor } = describe(item);
 	// Ziel-RPE wie die übrigen Assistenzübungen des Tages, sonst 7.
 	const reference = day.exercises.find((e) => !e.isMain) ?? day.exercises[0];
 	const ex: ProgramExercise = {
 		exercise: item.name,
 		category: item.category,
 		lift,
-		isMain: lift !== null,
+		loadFactor,
+		isMain: loadFactor === 1,
+		role: loadFactor === 1 ? 'main' : loadFactor ? 'secondary' : 'accessory',
 		weekSets: Array(weeks).fill(3),
-		weekReps: Array(weeks).fill(lift ? '5' : '8–12'),
+		weekReps: Array(weeks).fill(lift ? '6' : '8–12'),
 		weekRpes: reference?.weekRpes ? [...reference.weekRpes] : Array(weeks).fill(7),
 		weekWeights: Array(weeks).fill(''),
 		weekWeightOverrides: Array(weeks).fill(false),
