@@ -16,7 +16,8 @@ import {
 	setMaxes,
 	updateMax
 } from './loads.ts';
-import { generateSplitProgram, phaseFor, volumeRamp } from './splits.ts';
+import { cycleWeeksFor, generateSplitProgram, phaseFor, volumeRamp } from './splits.ts';
+import { layoutWithPrefix, remapProgram, typesFromLengths, waveLengths, type WeekType } from './waves.ts';
 import type {
 	Bests,
 	Block,
@@ -37,6 +38,7 @@ import type {
 const pl = engine as unknown as {
 	generatePlan(options: Record<string, unknown>): unknown;
 	rpePercent(reps: number, rpe: number): number;
+	templateCycleWeeks(frequency: number, level: string): number;
 	EXERCISES: { name: string; group: string; category?: string }[];
 	categoryInCatalog(name: string): string;
 };
@@ -44,6 +46,7 @@ const pl = engine as unknown as {
 export { ALL_LIFTS, loadRef } from './loads.ts';
 export { DAYS_FOR_GOAL, splitLabel } from './splits.ts';
 export { e1rm } from './loads.ts';
+export { layoutWithPrefix, typesFromLengths, waveLengths } from './waves.ts';
 
 export const LIFT_LABEL: Record<MainLift, string> = {
 	squat: 'Kniebeuge',
@@ -88,7 +91,26 @@ const PLAIN_NAMES: Record<string, string> = {
 	Wettkampfkreuzheben: 'Kreuzheben'
 };
 
+/** Standardlänge eines neuen Plans in Wochen. */
+export function defaultWeeks(req: PlanRequest): number {
+	if (req.goal === 'powerlifting') return pl.templateCycleWeeks(req.daysPerWeek, req.experience);
+	return cycleWeeksFor(req.goal, req.experience);
+}
+
+/**
+ * Plan erzeugen. Die Engines bauen 4-Wochen-Wellen; danach wird das Programm auf die
+ * gewünschte Länge und Wellenverteilung umgelegt (letzte Woche immer Entlastung).
+ */
 export function createProgram(req: PlanRequest): Program {
+	const weeks = Math.max(4, Math.min(52, Math.round(req.weeks ?? defaultWeeks(req))));
+	const lengths = waveLengths(weeks, req.experience);
+	const program = generateBase({ ...req, weeks: lengths.length * 4 });
+	remapProgram(program, lengths, 0);
+	applyLoadsToProgram(program, 0);
+	return program;
+}
+
+function generateBase(req: PlanRequest): Program {
 	if (req.goal !== 'powerlifting') return generateSplitProgram(req);
 	const block = req.block ?? 'strength';
 	// Die Powerlifting-Engine erwartet 3er-Gewichte bei RPE 8; danach setzen wir die
@@ -649,36 +671,24 @@ export function editExercise(
 // ---------- Plan anpassen ----------
 
 /**
- * Planlänge ändern. Neue Wochen setzen die Vier-Wochen-Welle fort (Woche 4, 8, …
- * Entlastung) und übernehmen die Vorgaben der entsprechenden Woche davor; die
- * Gewichte steigen über die erwartete Entwicklung des Maximums weiter.
+ * Planlänge ändern. Die Wellen werden neu verteilt (4–6 Wochen, letzte Woche immer
+ * Entlastung); bereits trainierte Wochen (vor `keep`) bleiben unverändert. Eigene
+ * Änderungen an Übungen werden auf die neue Struktur übertragen.
  */
-export function setPlanLength(program: Program, weeks: number) {
-	const old = weekCount(program);
+export function setPlanLength(program: Program, weeks: number, keep = 0) {
 	const target = Math.max(4, Math.min(52, Math.round(weeks)));
-	if (target === old) return;
-	const types = fill(program.weekTypes, old, 'regular' as 'regular' | 'deload');
-	for (let i = old; i < target; i++) types[i] = i % 4 === 3 ? 'deload' : 'regular';
-	program.weekTypes = types.slice(0, target);
-	program.cycleWeeks = target;
-	program.days.forEach((day) =>
-		day.exercises.forEach((ex) => {
-			const src = (list: unknown[] | undefined, i: number) => {
-				const arr = Array.isArray(list) ? list : [];
-				return arr[i - 4 >= 0 ? i - 4 : Math.max(0, arr.length - 1)];
-			};
-			for (const key of ['weekSets', 'weekReps', 'weekRpes'] as const) {
-				const arr = [...((ex[key] as unknown[]) ?? [])].slice(0, target);
-				for (let i = arr.length; i < target; i++) arr.push(src(arr, i));
-				(ex as Record<string, unknown>)[key] = arr;
-			}
-			ex.weekWeights = fill(ex.weekWeights, old, '').slice(0, target);
-			ex.weekWeightOverrides = fill(ex.weekWeightOverrides, old, false).slice(0, target);
-			while (ex.weekWeights.length < target) ex.weekWeights.push('');
-			while (ex.weekWeightOverrides.length < target) ex.weekWeightOverrides.push(false);
-		})
-	);
-	if (target > old) program.days.forEach((day) => day.exercises.forEach((ex) => recompute(program, ex, old)));
+	const level = (program.level as Experience) ?? 'intermediate';
+	const lengths = layoutWithPrefix((program.weekTypes ?? []) as WeekType[], keep, target, level);
+	const before = JSON.stringify(program.weekTypes);
+	if (target === weekCount(program) && JSON.stringify(typesFromLengths(lengths)) === before) return;
+	remapProgram(program, lengths, keep);
+	applyLoadsToProgram(program, Math.max(0, keep));
+}
+
+/** Vorschau: Wochentypen nach einer Längenänderung. */
+export function previewLength(program: Program, weeks: number, keep = 0): WeekType[] {
+	const level = (program.level as Experience) ?? 'intermediate';
+	return typesFromLengths(layoutWithPrefix((program.weekTypes ?? []) as WeekType[], keep, weeks, level));
 }
 
 export function renameDay(program: Program, dayIndex: number, title: string) {

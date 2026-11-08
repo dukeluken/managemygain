@@ -2,7 +2,15 @@
 	// Plan anpassen: Name, Namen der Trainingstage, Länge in Wochen.
 	import { session } from '#lib/data/session.svelte.ts';
 	import type { Plan } from '#lib/data/types.ts';
-	import { WEEKDAY_SHORT, dayTitle, renameDay, setPlanLength, weekCount, weekIndexAt } from '#lib/engine/index.ts';
+	import {
+		WEEKDAY_SHORT,
+		dayTitle,
+		previewLength,
+		renameDay,
+		setPlanLength,
+		weekCount,
+		weekIndexAt
+	} from '#lib/engine/index.ts';
 	import { untrack } from 'svelte';
 	import Icon from './Icon.svelte';
 	import Sheet from './Sheet.svelte';
@@ -10,20 +18,30 @@
 	let { plan, onclose }: { plan: Plan; onclose: () => void } = $props();
 
 	// Momentaufnahme beim Öffnen.
-	const start = untrack(() => ({
-		name: plan.name,
-		days: plan.program.days.map((d) => dayTitle(d)),
-		weeks: weekCount(plan.program),
-		// Bereits begonnene Wochen können nicht weggekürzt werden.
-		minWeeks: Math.max(4, Math.min(weekCount(plan.program), weekIndexAt(plan, new Date()) + 1))
-	}));
+	const start = untrack(() => {
+		const current = Math.max(0, weekIndexAt(plan, new Date()));
+		// Feste Wochen: alles vor der aktuellen Woche, und die aktuelle, wenn darin schon trainiert wurde.
+		const trainedNow = session.workouts.some((w) => w.weekIndex === current);
+		const keep = Math.min(weekCount(plan.program), current + (trainedNow ? 1 : 0));
+		return {
+			name: plan.name,
+			days: plan.program.days.map((d) => dayTitle(d)),
+			weeks: weekCount(plan.program),
+			keep,
+			// Bereits begonnene Wochen können nicht weggekürzt werden.
+			minWeeks: Math.max(4, keep + 1)
+		};
+	});
 
 	let name = $state(start.name);
 	let days = $state([...start.days]);
 	let weeks = $state(start.weeks);
 
-	const deloads = $derived(Array.from({ length: weeks }, (_, i) => i + 1).filter((w) => w % 4 === 0));
+	const types = $derived(previewLength(plan.program, weeks, start.keep));
+	const deloads = $derived(types.map((t, i) => (t === 'deload' ? i + 1 : 0)).filter(Boolean));
+	const structureChanges = $derived(JSON.stringify(types) !== JSON.stringify(plan.program.weekTypes));
 	const changed = $derived(
+		structureChanges ||
 		name.trim() !== start.name || weeks !== start.weeks || days.some((d, i) => d.trim() !== start.days[i])
 	);
 
@@ -34,7 +52,7 @@
 				days.forEach((title, i) => {
 					if (title.trim() !== start.days[i]) renameDay(program, i, title);
 				});
-				if (weeks !== start.weeks) setPlanLength(program, weeks);
+				if (weeks !== start.weeks || structureChanges) setPlanLength(program, weeks, start.keep);
 			}
 		});
 		onclose();
@@ -72,13 +90,12 @@
 			</div>
 			<div class="bar" aria-hidden="true">
 				{#each Array.from({ length: weeks }, (_, i) => i) as i (i)}
-					<i class:deload={(i + 1) % 4 === 0} class:new={i >= start.weeks}></i>
+					<i class:deload={types[i] === 'deload'} class:new={i >= start.weeks} class:fixed={i < start.keep}></i>
 				{/each}
 			</div>
 			<span class="muted note">
-				Entlastung in Woche {deloads.join(', ') || '–'}.{weeks > start.weeks
-					? ' Neue Wochen setzen die Steigerung fort.'
-					: ''}{weeks < start.weeks ? ` Die Wochen ${weeks + 1}–${start.weeks} fallen weg.` : ''}
+				Entlastung in Woche {deloads.join(', ') || '–'}. Die letzte Woche ist immer eine Entlastung, die Wellen werden
+				gleichmäßig verteilt{start.keep ? `; die Wochen 1–${start.keep} bleiben, wie trainiert` : ''}.
 			</span>
 		</div>
 	</section>
@@ -177,6 +194,9 @@
 	.bar i.new {
 		background: var(--ac);
 		opacity: 1;
+	}
+	.bar i.fixed {
+		opacity: 0.45;
 	}
 	.bar i.deload {
 		background: transparent;

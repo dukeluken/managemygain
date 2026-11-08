@@ -52,9 +52,12 @@ describe('alle Ziele und Tage erzeugen sinnvolle Pläne', () => {
 							}
 						}
 					}
-					// Entlastung: weniger Sätze als in der Woche davor
+					// Entlastung: weniger Sätze als in der Woche davor, letzte Woche immer Entlastung
 					const total = (w: number) => Object.values(weeklySets(program, w)).reduce((a, b) => a + b, 0);
-					expect(total(3)).toBeLessThan(total(2));
+					const firstDeload = program.weekTypes.indexOf('deload');
+					expect(firstDeload).toBeGreaterThanOrEqual(3);
+					expect(total(firstDeload)).toBeLessThan(total(firstDeload - 1));
+					expect(program.weekTypes[program.weekTypes.length - 1]).toBe('deload');
 				});
 			}
 		}
