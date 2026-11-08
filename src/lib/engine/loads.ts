@@ -153,6 +153,23 @@ export function applyLoads(program: Program, ex: ProgramExercise, fromWeek = 0) 
 		const load = plannedLoad(program, ex, i);
 		ex.weekWeights[i] = load ?? '';
 	}
+	// Top-Singles: 1 Wiederholung bei der Ziel-RPE der Woche.
+	if (ex.weekTopSingle?.some((r) => r != null)) {
+		ex.weekSingleWeights = fit(ex.weekSingleWeights, '' as number | '');
+		for (let i = Math.max(0, fromWeek); i < weeks; i++) {
+			ex.weekSingleWeights[i] = singleLoad(program, ex, i) ?? '';
+		}
+	}
+}
+
+/** Gewicht des Top-Singles einer Woche aus dem Bestwert, oder null. */
+export function singleLoad(program: Program, ex: ProgramExercise, weekIndex: number): number | null {
+	const rpe = ex.weekTopSingle?.[weekIndex];
+	const ref = loadRef(ex);
+	if (rpe == null || !ref) return null;
+	const max = expectedMax(program, ref.lift, weekIndex);
+	if (!max) return null;
+	return round(max * pl.rpePercent(1, rpe) * ref.factor * (Number(ex.loadScale) || 1), Number(program.rounding) || 2.5);
 }
 
 export function applyLoadsToProgram(program: Program, fromWeek = 0, lift: MainLift | null = null) {

@@ -82,7 +82,15 @@ export function layoutWithPrefix(types: WeekType[], keep: number, total: number,
 	return [...prefix, ...rest];
 }
 
-const ARRAY_KEYS = ['weekSets', 'weekReps', 'weekRpes', 'weekWeights', 'weekWeightOverrides'] as const;
+const ARRAY_KEYS = [
+	'weekSets',
+	'weekReps',
+	'weekRpes',
+	'weekWeights',
+	'weekWeightOverrides',
+	'weekTopSingle',
+	'weekSingleWeights'
+] as const;
 
 /**
  * Programm auf eine neue Wellenstruktur übertragen. Jede neue Woche übernimmt die
@@ -128,6 +136,7 @@ export function remapProgram(program: Program, lengths: number[], keep = 0) {
 	program.days.forEach((day) =>
 		day.exercises.forEach((ex: ProgramExercise) => {
 			for (const key of ARRAY_KEYS) {
+				if (ex[key] === undefined) continue;
 				const old = (ex[key] as unknown[]) ?? [];
 				const fallback = old[old.length - 1];
 				(ex as Record<string, unknown>)[key] = source.map((src, i) => (i < fixed ? old[i] : (old[src] ?? fallback)));
@@ -138,6 +147,11 @@ export function remapProgram(program: Program, lengths: number[], keep = 0) {
 				ex.weekSets[i] = Math.max(1, Math.round(Number(ex.weekSets[i]) * 0.6));
 				ex.weekRpes[i] = 6;
 				ex.weekWeightOverrides[i] = false;
+				if (ex.weekTopSingle) ex.weekTopSingle[i] = null;
+			});
+			// Entlastungswochen: nie ein Top-Single.
+			newTypes.forEach((t, i) => {
+				if (t === 'deload' && i >= fixed && ex.weekTopSingle) ex.weekTopSingle[i] = null;
 			});
 			if (ex.anchor && ex.anchor.week >= total) delete ex.anchor;
 		})

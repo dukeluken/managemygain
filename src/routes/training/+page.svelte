@@ -5,6 +5,8 @@
 	import { session } from '#lib/data/session.svelte.ts';
 	import type { Feel, LoggedExercise, Workout } from '#lib/data/types.ts';
 	import {
+		amountLabel,
+		backoffFromSingle,
 		dayPrescription,
 		dayTitle,
 		doubleProgression,
@@ -54,14 +56,28 @@
 				exercise: p.exercise,
 				lift: p.lift,
 				isMain: p.isMain,
-				target: { sets: p.sets, reps: p.reps, rpe: p.rpe, weight, ...(hint ? { hint } : {}) },
-				sets: Array.from({ length: p.sets }, (_, k) => ({
+				target: {
+					sets: p.sets,
+					reps: p.reps,
+					rpe: p.rpe,
 					weight,
-					reps: dp?.reps[k] ?? firstNumber(p.reps),
-					feel: null,
-					rpe: null,
-					done: false
-				}))
+					...(hint ? { hint } : {}),
+					...(p.topSingle ? { topSingle: p.topSingle } : {})
+				},
+				sets: [
+					// Top-Single zuerst, danach die Back-offs.
+					...(p.topSingle
+						? [{ kind: 'single' as const, weight: p.topSingle.weight, reps: 1, feel: null, rpe: null, done: false }]
+						: []),
+					...Array.from({ length: p.sets }, (_, k) => ({
+						...(p.topSingle ? { kind: 'backoff' as const } : {}),
+						weight,
+						reps: dp?.reps[k] ?? firstNumber(p.reps),
+						feel: null,
+						rpe: null,
+						done: false
+					}))
+				]
 			};
 		});
 		return {
@@ -167,14 +183,16 @@
 	function log(feel: Feel | null, rpe?: number) {
 		if (!ex || !set) return;
 		commitWeight();
+		const targetRpe = set.kind === 'single' ? (ex.target.topSingle?.rpe ?? 8) : ex.target.rpe;
 		if (rpe != null) {
 			set.rpe = rpe;
-			set.feel = rpeToFeel(rpe, ex.target.rpe);
+			set.feel = rpeToFeel(rpe, targetRpe);
 		} else if (feel) {
 			set.feel = feel;
-			set.rpe = feelToRpe(feel, ex.target.rpe);
+			set.rpe = feelToRpe(feel, targetRpe);
 		}
 		set.done = true;
+		if (set.kind === 'single') adjustBackoffs(ex, set);
 		persist();
 		const nextSet = ex.sets.findIndex((s) => !s.done);
 		if (nextSet >= 0) {
@@ -190,6 +208,27 @@
 			setTimeout(backToList, 450);
 		}
 	}
+
+	/** Back-off-Gewichte aus dem tatsächlichen Single ableiten (Tagesform, ±10 %). */
+	let backoffNote = $state<Record<string, string>>({});
+	function adjustBackoffs(e: LoggedExercise, single: LoggedExercise['sets'][number]) {
+		const planned = e.target.topSingle;
+		if (!planned?.weight || !e.target.weight || !single.weight || single.rpe == null) return;
+		const w = backoffFromSingle(e.target.weight, { weight: planned.weight, rpe: planned.rpe }, { weight: single.weight, rpe: single.rpe }, step);
+		e.sets.forEach((s) => {
+			if (s.kind === 'backoff' && !s.done) s.weight = w;
+		});
+		const diff = w - e.target.weight;
+		backoffNote[e.exercise] =
+			diff === 0
+				? `Single wie geplant. Back-offs bleiben bei ${kg(w)} kg.`
+				: `Single ${diff > 0 ? 'leichter' : 'schwerer'} als geplant: Back-offs ${diff > 0 ? '+' : '−'}${kg(Math.abs(diff))} kg auf ${kg(w)} kg.`;
+	}
+
+	// Anzeigename des aktuellen Satzes (Single zählt nicht bei den Back-offs mit).
+	const setName = $derived(
+		set?.kind === 'single' ? 'Top-Single' : set?.kind === 'backoff' ? `Back-off ${setIndex}` : `Satz ${setIndex + 1}`
+	);
 
 	function selectSet(i: number) {
 		setIndex = i;
@@ -314,7 +353,7 @@
 					<span class="exmain">
 						<b>{e.exercise}</b>
 						<small class="num">
-							{e.target.sets} × {e.target.reps}{e.target.weight ? ` · ${kg(e.target.weight)} kg` : ''} · RPE {rpeLabel(e.target.rpe)}
+							{amountLabel(e.target)}
 						</small>
 					</span>
 					<span class="exprog num">
@@ -340,10 +379,21 @@
 		{#if set}
 			<section class="tile card" aria-label="Aktueller Satz">
 				<div class="target muted">
-					Satz {setIndex + 1} von {ex.sets.length} · Ziel {ex.target.reps} Wdh.{ex.target.weight
-						? ` · ${kg(ex.target.weight)} kg`
-						: ''} · <b class="rpe">RPE {rpeLabel(ex.target.rpe)}</b>
+					{#if set.kind === 'single'}
+						<b class="kind">Top-Single</b> · 1 Wdh.{ex.target.topSingle?.weight ? ` · ${kg(ex.target.topSingle.weight)} kg` : ''} ·
+						<b class="rpe">RPE {rpeLabel(ex.target.topSingle?.rpe ?? 8)}</b>
+					{:else}
+						{set.kind === 'backoff' ? 'Back-off' : 'Satz'}
+						{set.kind === 'backoff' ? setIndex : setIndex + 1} von {set.kind === 'backoff' ? ex.sets.length - 1 : ex.sets.length}
+						· Ziel {ex.target.reps} Wdh.{ex.target.weight ? ` · ${kg(ex.target.weight)} kg` : ''} ·
+						<b class="rpe">RPE {rpeLabel(ex.target.rpe)}</b>
+					{/if}
 				</div>
+				{#if set.kind === 'single'}
+					<p class="dp">Eine schwere Wiederholung, nicht maximal. Danach richten sich die Back-offs nach deiner Tagesform.</p>
+				{:else if set.kind === 'backoff' && backoffNote[ex.exercise]}
+					<p class="dp up">{backoffNote[ex.exercise]}</p>
+				{/if}
 				{#if ex.target.hint}
 					<p class="dp" class:up={ex.target.hint.includes('geschafft')}>{ex.target.hint}</p>
 				{/if}
@@ -379,7 +429,7 @@
 		<section class="sets" aria-label="Sätze">
 			{#each ex.sets as s, i (i)}
 				<button class="set" class:cur={i === setIndex} class:done={s.done} onclick={() => selectSet(i)}>
-					<span class="n num">{i + 1}</span>
+					<span class="n num">{s.kind === 'single' ? 'S' : s.kind === 'backoff' ? i : i + 1}</span>
 					<span class="num">{s.weight != null ? `${kg(s.weight)} kg` : '–'} × {s.reps ?? '–'}</span>
 					<span class="tag"
 						>{s.done ? (rpeMode && s.rpe != null ? `✓ RPE ${rpeLabel(s.rpe)}` : `✓ ${s.feel}`) : i === setIndex ? 'jetzt' : ''}</span
@@ -394,16 +444,16 @@
 				<div class="q-row">
 					<span class="muted q">
 						{set.done
-							? `Satz ${setIndex + 1} erledigt${rpeMode && set.rpe != null ? ` (RPE ${rpeLabel(set.rpe)})` : ` (${set.feel})`}. Neu bewerten:`
+							? `${setName} erledigt${rpeMode && set.rpe != null ? ` (RPE ${rpeLabel(set.rpe)})` : ` (${set.feel})`}. Neu bewerten:`
 							: rpeMode
-								? `RPE von Satz ${setIndex + 1}? Ziel ${rpeLabel(ex.target.rpe)}`
-								: `Wie schwer war Satz ${setIndex + 1}?`}
+								? `RPE ${setName === 'Top-Single' ? 'des Top-Singles' : `von ${setName}`}? Ziel ${rpeLabel(set.kind === 'single' ? (ex.target.topSingle?.rpe ?? 8) : ex.target.rpe)}`
+								: `Wie schwer war ${setName === 'Top-Single' ? 'das Top-Single' : setName}?`}
 					</span>
 					<button class="switch-scale" onclick={() => session.setEffortScale(rpeMode ? 'simple' : 'rpe')}>
 						{rpeMode ? 'leicht/okay/hart' : 'RPE eingeben'}
 					</button>
 				</div>
-				{@render effortButtons((f) => log(f), (r) => log(null, r), ex.target.rpe)}
+				{@render effortButtons((f) => log(f), (r) => log(null, r), set.kind === 'single' ? (ex.target.topSingle?.rpe ?? 8) : ex.target.rpe)}
 			</div>
 		{/if}
 
@@ -717,6 +767,9 @@
 	.dp.up {
 		color: var(--ok);
 		font-weight: 600;
+	}
+	.target .kind {
+		color: var(--ac-ink);
 	}
 	.target .rpe {
 		color: var(--tx);

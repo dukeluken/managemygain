@@ -16,13 +16,13 @@
 		kg,
 		nextDayIndex,
 		parseIsoDate,
-		progressSeries,
+		liftTrajectories,
 		weekCount,
 		weekIndexAt,
 		rpeLabel,
 		weekSlots
 	} from '#lib/engine/index.ts';
-	import Sparkline from '#lib/ui/Sparkline.svelte';
+	import TrajectoryChart from '#lib/ui/TrajectoryChart.svelte';
 
 	const today = new Date();
 	const dateLabel = `${WEEKDAY_LONG[today.getDay()]}, ${today.toLocaleDateString('de-DE', { day: 'numeric', month: 'long' })}`;
@@ -55,18 +55,14 @@
 		plan ? Array.from({ length: weeks }, (_, i) => i).find((i) => i >= weekIndex && isDeload(plan.program, i)) : undefined
 	);
 
-	// Fortschritt
-	const series = $derived(plan ? progressSeries(plan, session.workouts) : null);
-	const progress = $derived(
-		plan && series
-			? programLifts(plan.program).map((lift) => {
-					const values = (series[lift] ?? []).map((p) => p.value);
-					const current = values.length ? values[values.length - 1] : estimatedMax(plan.program, lift, weekIndex);
-					const start = values[0] ?? current;
-					return { lift, values, current, delta: current != null && start != null ? current - start : 0 };
-				}).filter((p) => p.current != null)
-			: []
+	// Gewichtsentwicklung im Plan: geplant, geschafft, Ziel am Ende
+	const trajectories = $derived(
+		plan ? liftTrajectories(plan, session.workouts).filter((t) => t.weeks.some((w) => w.planned != null)) : []
 	);
+	const withoutWeights = $derived(
+		plan ? liftTrajectories(plan, session.workouts).filter((t) => !t.weeks.some((w) => w.planned != null)) : []
+	);
+	const nowWeek = $derived(Math.min(Math.max(0, weekIndex), Math.max(0, weeks - 1)));
 
 	const block = $derived(plan ? blockOf(plan) : null);
 	const nextBlock = $derived(block === 'hypertrophy' ? 'strength' : 'hypertrophy');
@@ -172,24 +168,52 @@
 		</div>
 	{/if}
 
-	{#if plan && progress.length}
-		<section aria-label="Fortschritt" data-tour="progress">
-			<div class="eyebrow head"><span>Fortschritt · geschätzte Bestwerte</span><span>{totalDone} Trainings</span></div>
+	{#if plan && inPlan && trajectories.length}
+		<section aria-label="Gewichtsentwicklung" data-tour="progress">
+			<div class="eyebrow head">
+				<span>Deine Gewichte in diesem Plan</span>
+				<span class="legend"><i class="l-line"></i>geplant <i class="l-dot"></i>geschafft</span>
+			</div>
 			<div class="tile progress">
-				{#each progress as p (p.lift)}
+				{#each trajectories as t (t.lift)}
+					{@const now = t.weeks[nowWeek]}
+					{@const first = t.weeks.find((w) => w.planned != null)}
 					<div class="prow">
-						<div class="pname">
-							<span>{LIFT_LABEL[p.lift]}</span>
-							<small class:up={p.delta > 0.05} class:muted={p.delta <= 0.05}>{signed(p.delta)} kg seit Start</small>
+						<div class="ptop">
+							<b>{LIFT_LABEL[t.lift]}</b>
+							{#if t.goal}
+								<span class="goal num">
+									Ziel W{t.goal.week + 1}: <b>{kg(t.goal.weight)} kg</b>{t.goal.reps ? ` × ${t.goal.reps}` : ''}{t.goalSingle
+										? ` · Single ${kg(t.goalSingle)}`
+										: ''}
+								</span>
+							{/if}
 						</div>
-						<Sparkline
-							values={p.values.length ? p.values : [p.current ?? 0]}
-							label="{LIFT_LABEL[p.lift]}: von {kg(Math.round(p.values[0] ?? p.current ?? 0))} auf {kg(Math.round(p.current ?? 0))} kg"
+						<TrajectoryChart
+							weeks={t.weeks}
+							current={nowWeek}
+							label="{LIFT_LABEL[t.lift]}: diese Woche {now?.planned != null ? kg(now.planned) : '–'} kg, Ziel {t.goal ? kg(t.goal.weight) : '–'} kg in Woche {t.goal ? t.goal.week + 1 : '–'}"
 						/>
-						<b class="display num pval">{kg(Math.round(p.current ?? 0))}</b>
+						<div class="pfoot num">
+							<span class="muted">W1{first?.planned != null ? ` · ${kg(first.planned)} kg` : ''}</span>
+							<span>
+								Jetzt <b>{now?.planned != null ? `${kg(now.planned)} kg` : '–'}</b>{now?.plannedReps ? ` × ${now.plannedReps}` : ''}{now?.deload
+									? ' · leicht'
+									: ''}
+							</span>
+							{#if t.goal && first?.planned != null}
+								<span class:up={t.goal.weight > first.planned} class="delta">{signed(t.goal.weight - first.planned)} kg</span>
+							{/if}
+						</div>
 					</div>
 				{/each}
 			</div>
+			{#if withoutWeights.length}
+				<p class="muted note">
+					{withoutWeights.map((t) => LIFT_LABEL[t.lift]).join(', ')}: noch kein Bestwert. Die Gewichte erscheinen nach dem ersten Training
+					oder wenn du sie im Profil einträgst.
+				</p>
+			{/if}
 		</section>
 	{/if}
 
@@ -357,34 +381,73 @@
 		padding: 4px 18px;
 	}
 	.prow {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) 96px 62px;
-		align-items: center;
-		gap: 12px;
-		padding: 12px 0;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding: 14px 0 12px;
 		border-bottom: 1px solid var(--sf2);
 	}
 	.prow:last-child {
 		border: 0;
 	}
-	.pname {
+	.ptop {
 		display: flex;
-		flex-direction: column;
-		gap: 2px;
-		min-width: 0;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 10px;
+		flex-wrap: wrap;
 	}
-	.pname span {
+	.ptop > b {
+		font-weight: 650;
+	}
+	.goal {
+		font-size: 12.5px;
+		color: var(--mu);
+	}
+	.goal b {
+		color: var(--ac-ink);
+		font-weight: 700;
+	}
+	.pfoot {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 10px;
+		font-size: 12.5px;
+	}
+	.pfoot b {
+		font-weight: 700;
+	}
+	.delta {
+		color: var(--mu);
 		font-weight: 600;
 	}
-	.pname small {
-		font-size: 12px;
-	}
-	.pname small.up {
+	.delta.up {
 		color: var(--ok);
 	}
-	.pval {
-		font-size: 32px;
-		text-align: right;
+	.legend {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.l-line {
+		display: inline-block;
+		width: 14px;
+		height: 2px;
+		border-radius: 2px;
+		background: var(--ac-ink);
+	}
+	.l-dot {
+		display: inline-block;
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: var(--tx);
+		margin-left: 6px;
+	}
+	.note {
+		margin: 8px 0 0;
+		font-size: 12.5px;
 	}
 	.all {
 		color: var(--ac-ink);

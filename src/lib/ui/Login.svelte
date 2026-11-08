@@ -10,7 +10,7 @@
 </script>
 
 <main class="page login">
-	<div class="brand">managemygain</div>
+	<div class="brand"><img src="/icon.svg" alt="" width="40" height="40" />managemygain</div>
 	<div class="hero">
 		<h1 class="display">Dein Training.<br />Jede Woche klar.</h1>
 		<p class="muted">Plan erstellen, Woche für Woche trainieren und sehen, wie du stärker wirst. Für Kraftsport jeder Art.</p>
@@ -30,11 +30,17 @@
 		padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 32px);
 	}
 	.brand {
+		display: flex;
+		align-items: center;
+		gap: 12px;
 		font-family: var(--f-num);
 		font-stretch: 75%;
 		font-weight: 700;
 		font-size: 20px;
 		color: var(--ac-ink);
+	}
+	.brand img {
+		border-radius: 11px;
 	}
 	.hero {
 		display: flex;

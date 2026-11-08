@@ -15,6 +15,7 @@
 		moveExercise,
 		prescribe,
 		removeExercise,
+		setTopSingle,
 		swapExercise,
 		weekCount
 	} from '#lib/engine/index.ts';
@@ -52,6 +53,10 @@
 	let reps = $state(p.reps);
 	let rpe = $state(p.rpe);
 	let auto = $state(isLift && !overridden && !personal);
+	// Top-Single nur bei Übungen mit Bestwert-Bezug, nie in Entlastungswochen.
+	const hadSingle = untrack(() => ex.weekTopSingle?.[week] != null);
+	let single = $state(hadSingle);
+	const deloadWeek = untrack(() => isDeload(program, week));
 	let weightText = $state(p.weight != null ? kg(p.weight) : '');
 	let confirmDelete = $state(false);
 	let keypadOpen = $state(false);
@@ -110,6 +115,7 @@
 	const preview = $derived.by(() => {
 		const copy = structuredClone($state.snapshot(program)) as Program;
 		editExercise(copy, dayIndex, exIndex, week, to, patch());
+		if (single !== hadSingle) setTopSingle(copy, dayIndex, exIndex, week, to, single);
 		const last = Math.min(weeks, week + 6);
 		return Array.from({ length: last - week }, (_, k) => week + k).map((w) => ({
 			week: w,
@@ -119,7 +125,10 @@
 	});
 
 	function save() {
-		session.editPlan((prog) => editExercise(prog, dayIndex, exIndex, week, to, patch()));
+		session.editPlan((prog) => {
+			editExercise(prog, dayIndex, exIndex, week, to, patch());
+			if (single !== hadSingle) setTopSingle(prog, dayIndex, exIndex, week, to, single);
+		});
 		onclose();
 	}
 
@@ -197,6 +206,12 @@
 						<input id="edit-auto" type="checkbox" bind:checked={auto} />
 						<span>Automatisch aus deinen Bestwerten berechnen</span>
 					</label>
+					{#if !deloadWeek}
+						<label class="check">
+							<input id="edit-single" type="checkbox" bind:checked={single} />
+							<span>Top-Single vor den Sätzen (die Sätze werden zu Back-offs)</span>
+						</label>
+					{/if}
 				{/if}
 			</div>
 		</div>

@@ -10,6 +10,7 @@ import {
 	ALL_LIFTS,
 	applyLoads,
 	applyLoadsToProgram,
+	e1rm,
 	expectedMax,
 	loadRef,
 	rawLoad,
@@ -106,8 +107,91 @@ export function createProgram(req: PlanRequest): Program {
 	const lengths = waveLengths(weeks, req.experience);
 	const program = generateBase({ ...req, weeks: lengths.length * 4 });
 	remapProgram(program, lengths, 0);
+	if (phaseFor(req.goal, req.block) === 'strength') addTopSingles(program);
 	applyLoadsToProgram(program, 0);
 	return program;
+}
+
+// ---------- Top-Single + Back-offs ----------
+
+const SINGLE_LIFTS: MainLift[] = ['squat', 'bench', 'deadlift'];
+
+/** Schwerer Tag je Grundübung: erstes Vorkommen in der Woche (Volumentage ausgenommen). */
+function heavySlots(program: Program): ProgramExercise[] {
+	const order = program.days
+		.map((day, index) => ({ day, index }))
+		.sort((a, b) => WEEK_ORDER.indexOf(a.day.weekDay) - WEEK_ORDER.indexOf(b.day.weekDay));
+	const result: ProgramExercise[] = [];
+	for (const lift of SINGLE_LIFTS) {
+		for (const { day } of order) {
+			const ex = day.exercises.find((e) => {
+				const ref = loadRef(e);
+				return ref?.lift === lift && ref.factor === 1 && e.role !== 'volume';
+			});
+			if (ex) {
+				result.push(ex);
+				break;
+			}
+		}
+	}
+	return result;
+}
+
+/**
+ * Kraftblock: in der zweiten Blockhälfte am schweren Tag ein Top-Single vor den Sätzen
+ * (RPE steigt in der Welle von 7,5 bis höchstens 9), die Sätze danach sind Back-offs
+ * mit einem Satz weniger. Nie in Entlastungswochen.
+ */
+export function addTopSingles(program: Program) {
+	const weeks = weekCount(program);
+	const start = Math.ceil(weeks / 2);
+	const types = program.weekTypes ?? [];
+	const pos: number[] = [];
+	let p = 0;
+	types.forEach((t, i) => {
+		pos[i] = p;
+		p = t === 'deload' ? 0 : p + 1;
+	});
+	for (const ex of heavySlots(program)) {
+		ex.weekTopSingle = Array.from({ length: weeks }, (_, i) =>
+			i >= start && types[i] !== 'deload' ? Math.min(9, 7.5 + 0.5 * pos[i]) : null
+		);
+		ex.weekSets = ex.weekSets.map((sets, i) => (ex.weekTopSingle![i] != null ? Math.max(2, sets - 1) : sets));
+	}
+}
+
+/** Top-Single für die Wochen [from, to) ein- oder ausschalten (Entlastungswochen nie). */
+export function setTopSingle(program: Program, dayIndex: number, exIndex: number, from: number, to: number, on: boolean) {
+	const ex = program.days[dayIndex]?.exercises[exIndex];
+	if (!ex || !loadRef(ex)) return;
+	const weeks = weekCount(program);
+	ex.weekTopSingle = fill(ex.weekTopSingle, weeks, null as number | null);
+	for (let i = Math.max(0, from); i < Math.min(weeks, to); i++) {
+		ex.weekTopSingle[i] = on && !isDeload(program, i) ? (ex.weekTopSingle[i] ?? 8) : null;
+	}
+	if (!ex.weekTopSingle.some((r) => r != null)) {
+		delete ex.weekTopSingle;
+		delete ex.weekSingleWeights;
+	}
+	applyLoads(program, ex, Math.max(0, from));
+}
+
+/**
+ * Back-off-Gewicht nach dem geloggten Top-Single: das geplante Back-off-Gewicht wird
+ * im Verhältnis von tatsächlichem zu geplantem Single-Maximum angepasst (Tagesform),
+ * begrenzt auf ±10 %.
+ */
+export function backoffFromSingle(
+	plannedBackoff: number,
+	planned: { weight: number; rpe: number },
+	actual: { weight: number; rpe: number },
+	step = 2.5
+): number {
+	const plannedMax = e1rm(planned.weight, 1, planned.rpe);
+	const actualMax = e1rm(actual.weight, 1, actual.rpe);
+	if (!plannedMax || !actualMax) return plannedBackoff;
+	const factor = Math.min(1.1, Math.max(0.9, actualMax / plannedMax));
+	return Math.round((plannedBackoff * factor) / step) * step;
 }
 
 function generateBase(req: PlanRequest): Program {
@@ -217,6 +301,8 @@ export interface Prescription {
 	reps: string;
 	rpe: number;
 	weight: number | null;
+	/** Top-Single vor den Sätzen (die Sätze sind dann Back-offs). */
+	topSingle: { rpe: number; weight: number | null } | null;
 }
 
 function weekValue<T>(list: T[] | undefined, weekIndex: number, fallback: T): T {
@@ -233,8 +319,16 @@ export function prescribe(ex: ProgramExercise, weekIndex: number): Prescription 
 		sets: Number(weekValue(ex.weekSets, weekIndex, 3)) || 3,
 		reps: String(weekValue(ex.weekReps, weekIndex, '5')),
 		rpe: Number(weekValue(ex.weekRpes, weekIndex, 7)) || 7,
-		weight: typeof weight === 'number' && weight > 0 ? weight : null
+		weight: typeof weight === 'number' && weight > 0 ? weight : null,
+		topSingle: topSingleOf(ex, weekIndex)
 	};
+}
+
+function topSingleOf(ex: ProgramExercise, weekIndex: number): Prescription['topSingle'] {
+	const rpe = ex.weekTopSingle?.[weekIndex];
+	if (rpe == null) return null;
+	const w = ex.weekSingleWeights?.[weekIndex];
+	return { rpe, weight: typeof w === 'number' && w > 0 ? w : null };
 }
 
 export function dayPrescription(program: Program, weekIndex: number, dayIndex: number): Prescription[] {
@@ -248,8 +342,17 @@ export function rpeLabel(rpe: number): string {
 }
 
 /** Vorgabe kurz: „4 × 5 · 100 kg · RPE 7,5“. */
-export function amountLabel(p: { sets: number; reps: string; weight: number | null; rpe: number }): string {
-	return `${p.sets} × ${p.reps}${p.weight ? ` · ${kg(p.weight)} kg` : ''} · RPE ${rpeLabel(p.rpe)}`;
+export function amountLabel(p: {
+	sets: number;
+	reps: string;
+	weight: number | null;
+	rpe: number;
+	topSingle?: { rpe: number; weight: number | null } | null;
+}): string {
+	const base = `${p.sets} × ${p.reps}${p.weight ? ` · ${kg(p.weight)} kg` : ''} · RPE ${rpeLabel(p.rpe)}`;
+	if (!p.topSingle) return base;
+	const single = `Single${p.topSingle.weight ? ` ${kg(p.topSingle.weight)} kg` : ''} @ ${rpeLabel(p.topSingle.rpe)}`;
+	return `${single} + ${base}`;
 }
 
 /** Lesbarer Titel aus den Hauptübungen des Tages, z. B. „Kniebeuge & Bankdrücken“. */
@@ -447,9 +550,11 @@ export function applyWorkout(program: Program, workout: Workout): boolean {
 		if (!source || source.exercise !== logged.exercise) return;
 		const ref = loadRef(source);
 		if (!ref || ref.factor !== 1) return;
+		// Satz mit dem höchsten geschätzten Maximum; ein Top-Single ist dafür am genauesten.
 		const best = logged.sets
 			.filter((s) => s.done && s.weight && s.reps && s.rpe)
-			.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))[0];
+			.map((s) => ({ s, est: e1rm(s.weight!, s.reps!, s.rpe!) ?? 0 }))
+			.sort((a, b) => b.est - a.est)[0]?.s;
 		if (!best) return;
 		if (updateMax(program, ref.lift, best.weight!, best.reps!, best.rpe!, workout.weekIndex, level)) {
 			applyLoadsToProgram(program, workout.weekIndex + 1, ref.lift);
@@ -511,6 +616,72 @@ export function progressSeries(plan: Plan, workouts: Workout[]): Partial<Record<
 			return [lift, points];
 		})
 	) as Partial<Record<MainLift, ProgressPoint[]>>;
+}
+
+// ---------- Gewichtsentwicklung im Plan ----------
+
+export interface TrajectoryWeek {
+	week: number;
+	/** Geplantes Arbeitsgewicht (schwerster Arbeitssatz der Grundübung, ohne Top-Single). */
+	planned: number | null;
+	plannedReps: string | null;
+	/** Tatsächlich geschafft (schwerster erledigter Arbeitssatz). */
+	actual: number | null;
+	deload: boolean;
+}
+
+export interface LiftTrajectory {
+	lift: MainLift;
+	weeks: TrajectoryWeek[];
+	/** Ziel: geplantes Arbeitsgewicht der letzten Belastungswoche. */
+	goal: { week: number; weight: number; reps: string | null } | null;
+	/** Top-Single in dieser Ziel-Woche, falls geplant. */
+	goalSingle: number | null;
+}
+
+/** Entwicklung der Arbeitsgewichte je Grundübung über den aktiven Plan, mit Ziel am Ende. */
+export function liftTrajectories(plan: Plan, workouts: Workout[]): LiftTrajectory[] {
+	const program = plan.program;
+	const weeks = weekCount(program);
+	return programLifts(program).map((lift) => {
+		const anchors = program.days.flatMap((d) => d.exercises).filter((e) => {
+			const ref = loadRef(e);
+			return ref?.lift === lift && ref.factor === 1;
+		});
+		const names = new Set(anchors.map((e) => e.exercise));
+		const list: TrajectoryWeek[] = Array.from({ length: weeks }, (_, i) => {
+			let planned: number | null = null;
+			let plannedReps: string | null = null;
+			for (const e of anchors) {
+				const p = prescribe(e, i);
+				if (p.weight != null && (planned == null || p.weight > planned)) {
+					planned = p.weight;
+					plannedReps = p.reps;
+				}
+			}
+			let actual: number | null = null;
+			for (const w of workouts) {
+				if (w.weekIndex !== i || !w.finishedAt) continue;
+				for (const e of w.exercises) {
+					if (!names.has(e.exercise)) continue;
+					for (const s of e.sets) {
+						if (s.done && s.kind !== 'single' && s.weight && (actual == null || s.weight > actual)) actual = s.weight;
+					}
+				}
+			}
+			return { week: i, planned, plannedReps, actual, deload: isDeload(program, i) };
+		});
+		const last = [...list].reverse().find((w) => !w.deload && w.planned != null);
+		const singleAt = last
+			? Math.max(0, ...anchors.map((e) => prescribe(e, last.week).topSingle?.weight ?? 0))
+			: 0;
+		return {
+			lift,
+			weeks: list,
+			goal: last ? { week: last.week, weight: last.planned!, reps: last.plannedReps } : null,
+			goalSingle: singleAt || null
+		};
+	});
 }
 
 // ---------- Plan bearbeiten ----------

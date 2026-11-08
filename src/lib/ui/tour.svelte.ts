@@ -64,8 +64,8 @@ export const STEPS: TourStep[] = [
 		route: () => '/',
 		target: '[data-tour="progress"]',
 		when: 'plan',
-		title: 'Fortschritt',
-		text: 'Deine geschätzten Bestwerte. Nach jedem Training passt die App sie an deine Sätze an, und die kommenden Gewichte ziehen mit.'
+		title: 'Deine Gewichte im Plan',
+		text: 'So entwickeln sich deine Arbeitsgewichte über den Plan, mit dem Ziel am Ende. Die Linie ist geplant, die Punkte hast du geschafft. Nach jedem Training passt sich der Rest an.'
 	},
 	{
 		id: 'weeks',

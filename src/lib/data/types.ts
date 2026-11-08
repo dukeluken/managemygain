@@ -79,6 +79,10 @@ export interface ProgramExercise {
 	loadScale?: number;
 	/** Eigenes Startgewicht ohne Bestwert-Bezug; die folgenden Wochen steigern sich davon. */
 	anchor?: { week: number; weight: number };
+	/** Top-Single vor den Sätzen: Ziel-RPE je Woche (null = keins). Die Sätze sind dann Back-offs. */
+	weekTopSingle?: (number | null)[];
+	/** Berechnetes Gewicht des Top-Singles je Woche. */
+	weekSingleWeights?: (number | '')[];
 	[key: string]: unknown;
 }
 
@@ -128,6 +132,8 @@ export interface Plan {
 export type Feel = 'leicht' | 'okay' | 'hart';
 
 export interface LoggedSet {
+	/** single = Top-Single, backoff = Satz danach (Gewicht folgt dem Single). */
+	kind?: 'single' | 'backoff';
 	weight: number | null;
 	reps: number | null;
 	feel: Feel | null;
@@ -139,7 +145,15 @@ export interface LoggedExercise {
 	exercise: string;
 	lift: MainLift | null;
 	isMain: boolean;
-	target: { sets: number; reps: string; rpe: number; weight: number | null; hint?: string };
+	target: {
+		sets: number;
+		reps: string;
+		rpe: number;
+		weight: number | null;
+		hint?: string;
+		/** Top-Single der Woche (Ziel-RPE und geplantes Gewicht). */
+		topSingle?: { rpe: number; weight: number | null };
+	};
 	sets: LoggedSet[];
 }
 

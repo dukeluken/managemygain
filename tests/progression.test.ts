@@ -74,10 +74,11 @@ describe('Aufbaublock: Sätze steigen über die Welle', () => {
 		expect(s.slice(8, 11)).toEqual([4, 4, 5]);
 	});
 
-	test('Kraftblock: Sätze bleiben gleich', () => {
+	test('Kraftblock: Arbeitssätze bleiben gleich (Top-Single zählt mit)', () => {
 		const program = createProgram({ goal: 'strength', block: 'strength', daysPerWeek: 4, experience: 'intermediate', bests } as PlanRequest);
-		const s = sets(program, 'Kniebeuge');
-		expect(new Set([s[0], s[1], s[2], s[4], s[5], s[6]]).size).toBe(1);
+		const ex = program.days.flatMap((d) => d.exercises).find((e) => e.exercise === 'Kniebeuge')!;
+		const work = (i: number) => ex.weekSets[i] + (ex.weekTopSingle?.[i] != null ? 1 : 0);
+		expect(new Set([0, 1, 2, 4, 5, 6].map(work)).size).toBe(1);
 	});
 
 	test('Powerlifting-Aufbaublock steigert ebenfalls', () => {
