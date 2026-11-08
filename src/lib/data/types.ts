@@ -153,4 +153,6 @@ export interface Workout {
 	exercises: LoggedExercise[];
 	/** Geschätzte Bestwerte nach dem Training (für den Fortschrittsverlauf). */
 	estimates?: Partial<Record<MainLift, number | null>>;
+	/** Gesamtfeedback beim Beenden des Trainings. */
+	feedback?: { feel: Feel | null; rpe: number | null };
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, pushState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { workoutId } from '#lib/data/repo.ts';
 	import { session } from '#lib/data/session.svelte.ts';
@@ -18,6 +18,7 @@
 		usesMaxLoad
 	} from '#lib/engine/index.ts';
 	import Icon from '#lib/ui/Icon.svelte';
+	import Sheet from '#lib/ui/Sheet.svelte';
 	import { onDestroy } from 'svelte';
 
 	const weekIndex = Number(page.url.searchParams.get('w'));
@@ -79,22 +80,30 @@
 
 	let workout = $state<Workout | null>(draft());
 
-	// Erste Übung mit offenem Satz.
-	function firstOpen(w: Workout | null): [number, number] {
-		if (!w) return [0, 0];
-		for (let e = 0; e < w.exercises.length; e++) {
-			const s = w.exercises[e].sets.findIndex((x) => !x.done);
-			if (s >= 0) return [e, s];
-		}
-		return [Math.max(0, w.exercises.length - 1), 0];
-	}
-	const start = firstOpen(workout);
-	let exIndex = $state(start[0]);
-	let setIndex = $state(start[1]);
+	// Ansicht: Übersicht aller Übungen oder eine einzelne Übung. Die geöffnete Übung liegt
+	// im Browserverlauf (Shallow Routing), damit „Zurück“ zur Übersicht führt.
+	const exIndex = $derived(typeof page.state.exercise === 'number' ? page.state.exercise : null);
+	let setIndex = $state(0);
 
-	const ex = $derived(workout?.exercises[exIndex]);
+	function openExercise(i: number) {
+		const sets = workout!.exercises[i].sets;
+		setIndex = Math.max(0, sets.findIndex((s) => !s.done));
+		pushState('', { exercise: i });
+	}
+	function backToList() {
+		if (exIndex != null) history.back();
+	}
+
+	type ExStatus = 'done' | 'partial' | 'open';
+	function status(e: LoggedExercise): ExStatus {
+		const done = e.sets.filter((s) => s.done).length;
+		return done === e.sets.length && done > 0 ? 'done' : done > 0 ? 'partial' : 'open';
+	}
+
+	const ex = $derived(exIndex != null ? workout?.exercises[exIndex] : undefined);
 	const set = $derived(ex?.sets[setIndex]);
 	const allDone = $derived(!!workout && workout.exercises.every((e) => e.sets.every((s) => s.done)));
+	const doneExercises = $derived(workout ? workout.exercises.filter((e) => status(e) === 'done').length : 0);
 	const doneSets = $derived(workout ? workout.exercises.reduce((n, e) => n + e.sets.filter((s) => s.done).length, 0) : 0);
 	const totalSets = $derived(workout ? workout.exercises.reduce((n, e) => n + e.sets.length, 0) : 0);
 
@@ -172,22 +181,18 @@
 			setIndex = nextSet;
 			startRest(ex.isMain ? 180 : 90);
 		} else {
-			const nextEx = workout!.exercises.findIndex((e) => e.sets.some((s) => !s.done));
-			if (nextEx >= 0) {
-				exIndex = nextEx;
-				setIndex = workout!.exercises[nextEx].sets.findIndex((s) => !s.done);
-				startRest(120);
-			} else {
+			// Übung fertig: kurz das Häkchen zeigen, dann zurück zur Übersicht.
+			if (workout!.exercises.some((e) => e.sets.some((s) => !s.done))) startRest(120);
+			else {
 				clearInterval(timer);
 				restLeft = 0;
 			}
+			setTimeout(backToList, 450);
 		}
 	}
 
-	function select(e: number, s?: number) {
-		exIndex = e;
-		const sets = workout!.exercises[e].sets;
-		setIndex = s ?? Math.max(0, sets.findIndex((x) => !x.done));
+	function selectSet(i: number) {
+		setIndex = i;
 	}
 
 	function addSet() {
@@ -200,6 +205,41 @@
 
 	let finishing = $state(false);
 	let confirmLeave = $state(false);
+	let finishOpen = $state(false);
+	/** Übungen mit offenen Sätzen, die beim Beenden als „nicht gemacht“ markiert wurden. */
+	let skipped = $state<Record<number, boolean>>({});
+	const unrated = $derived(
+		workout
+			? workout.exercises
+					.map((e, i) => ({ e, i, open: e.sets.filter((s) => !s.done).length }))
+					.filter((x) => x.open > 0)
+			: []
+	);
+
+	/**
+	 * Training beenden: Das Gesamtfeedback gilt für alle noch unbewerteten Sätze der
+	 * Übungen, die als gemacht markiert sind. Nicht gemachte bleiben offen.
+	 */
+	function finishWith(feel: Feel | null, rpe?: number) {
+		if (!workout) return;
+		for (const { e, i } of unrated) {
+			if (skipped[i]) continue;
+			for (const s of e.sets) {
+				if (s.done) continue;
+				s.reps ??= firstNumber(e.target.reps);
+				if (rpe != null) {
+					s.rpe = rpe;
+					s.feel = rpeToFeel(rpe, e.target.rpe);
+				} else if (feel) {
+					s.feel = feel;
+					s.rpe = feelToRpe(feel, e.target.rpe);
+				}
+				s.done = true;
+			}
+		}
+		workout.feedback = { feel: rpe != null ? null : feel, rpe: rpe ?? null };
+		finish();
+	}
 	async function finish() {
 		if (!workout) return;
 		finishing = true;
@@ -216,31 +256,86 @@
 	}
 </script>
 
-{#if !workout || !ex}
+{#snippet restBar()}
+	{#if restLeft > 0}
+		<section class="rest" aria-live="polite">
+			<div class="rest-row">
+				<span class="muted">Pause</span>
+				<b class="num">{restLabel}</b>
+				<button class="skip" onclick={() => (restLeft = 0)}>überspringen</button>
+			</div>
+			<div class="bar"><i style:width="{(restLeft / restTotal) * 100}%"></i></div>
+		</section>
+	{/if}
+{/snippet}
+
+{#snippet effortButtons(onfeel: (feel: Feel) => void, onrpe: (rpe: number) => void, target: number | null)}
+	{#if rpeMode}
+		<div class="rpe-grid">
+			{#each RPE_SCALE as value (value)}
+				<button class:target={value === target} onclick={() => onrpe(value)}>{rpeLabel(value)}</button>
+			{/each}
+		</div>
+		<span class="muted hint">RPE 10 = nichts mehr übrig · 9 = noch 1 Wdh. · 8 = noch 2 · 7 = noch 3</span>
+	{:else}
+		<div class="feel tile">
+			<button onclick={() => onfeel('leicht')}>leicht</button>
+			<button onclick={() => onfeel('okay')}>okay</button>
+			<button onclick={() => onfeel('hart')}>hart</button>
+		</div>
+	{/if}
+{/snippet}
+
+{#if !workout}
 	<main class="page">
 		<h1 class="title">Training nicht gefunden.</h1>
-		<a class="cta" href="/"><span>Zurück zu Heute</span></a>
+		<a class="cta" href="/"><span>Zurück zum Start</span></a>
 	</main>
-{:else}
+{:else if !ex}
+	<!-- Übersicht: alle Übungen des Tages -->
 	<main class="page">
 		<header class="top">
 			<div>
-				<small class="muted">Übung {exIndex + 1} von {workout.exercises.length}</small>
-				<strong>{ex.exercise}</strong>
+				<small class="muted">Woche {weekIndex + 1} · {doneExercises} von {workout.exercises.length} Übungen erledigt</small>
+				<h1 class="title day">{workout.dayName}</h1>
 			</div>
 			<button class="round tile" onclick={leave} aria-label="Training verlassen"><Icon name="close" size={18} /></button>
 		</header>
 
-		<nav class="dots" aria-label="Übungen">
+		{@render restBar()}
+
+		<section class="exlist" aria-label="Übungen">
 			{#each workout.exercises as e, i (i)}
-				<button
-					class:on={i === exIndex}
-					class:done={e.sets.every((s) => s.done)}
-					onclick={() => select(i)}
-					aria-label="{e.exercise}{e.sets.every((s) => s.done) ? ', erledigt' : ''}"
-				></button>
+				{@const st = status(e)}
+				<button class="excard tile {st}" onclick={() => openExercise(i)}>
+					<span class="exnum num" aria-hidden="true">
+						{#if st === 'done'}<Icon name="check" size={18} />{:else}{i + 1}{/if}
+					</span>
+					<span class="exmain">
+						<b>{e.exercise}</b>
+						<small class="num">
+							{e.target.sets} × {e.target.reps}{e.target.weight ? ` · ${kg(e.target.weight)} kg` : ''} · RPE {rpeLabel(e.target.rpe)}
+						</small>
+					</span>
+					<span class="exprog num">
+						{#if st === 'done'}erledigt{:else}{e.sets.filter((s) => s.done).length}/{e.sets.length}{/if}
+					</span>
+				</button>
 			{/each}
-		</nav>
+		</section>
+
+		<button class="cta finish" onclick={() => (finishOpen = true)}>
+			<span>Training beenden</span><small>{doneSets} von {totalSets} Sätzen</small>
+		</button>
+	</main>
+{:else}
+	<!-- Eine Übung -->
+	<main class="page">
+		<header class="top ex-top">
+			<button class="round tile" onclick={backToList} aria-label="Zur Übersicht"><Icon name="back" size={18} /></button>
+			<small class="muted">Übung {exIndex! + 1} von {workout.exercises.length}</small>
+		</header>
+		<h1 class="title exname">{ex.exercise}</h1>
 
 		{#if set}
 			<section class="tile card" aria-label="Aktueller Satz">
@@ -257,7 +352,7 @@
 						id="weight"
 						class="display num"
 						inputmode="decimal"
-						placeholder="–"
+						placeholder="0"
 						aria-label="Gewicht in kg"
 						bind:value={weightText}
 						onblur={commitWeight}
@@ -283,7 +378,7 @@
 
 		<section class="sets" aria-label="Sätze">
 			{#each ex.sets as s, i (i)}
-				<button class="set" class:cur={i === setIndex} class:done={s.done} onclick={() => select(exIndex, i)}>
+				<button class="set" class:cur={i === setIndex} class:done={s.done} onclick={() => selectSet(i)}>
 					<span class="n num">{i + 1}</span>
 					<span class="num">{s.weight != null ? `${kg(s.weight)} kg` : '–'} × {s.reps ?? '–'}</span>
 					<span class="tag"
@@ -294,12 +389,7 @@
 			<button class="add" onclick={addSet}>+ Satz hinzufügen</button>
 		</section>
 
-		{#if allDone}
-			<button class="cta" onclick={finish} disabled={finishing}>
-				<span>{finishing ? 'Wird gespeichert …' : 'Training abschließen'}</span>
-				<small>{doneSets} Sätze</small>
-			</button>
-		{:else if set}
+		{#if set}
 			<div class="feel-wrap">
 				<div class="q-row">
 					<span class="muted q">
@@ -313,53 +403,172 @@
 						{rpeMode ? 'leicht/okay/hart' : 'RPE eingeben'}
 					</button>
 				</div>
-				{#if rpeMode}
-					<div class="rpe-grid">
-						{#each RPE_SCALE as value (value)}
-							<button class:target={value === ex.target.rpe} onclick={() => log(null, value)}>{rpeLabel(value)}</button>
-						{/each}
-					</div>
-					<span class="muted hint">RPE 10 = nichts mehr übrig · 9 = noch 1 Wdh. · 8 = noch 2 · 7 = noch 3</span>
-				{:else}
-					<div class="feel tile">
-						<button onclick={() => log('leicht')}>leicht</button>
-						<button onclick={() => log('okay')}>okay</button>
-						<button onclick={() => log('hart')}>hart</button>
-					</div>
-				{/if}
+				{@render effortButtons((f) => log(f), (r) => log(null, r), ex.target.rpe)}
 			</div>
 		{/if}
 
-		{#if restLeft > 0}
-			<section class="rest" aria-live="polite">
-				<div class="rest-row">
-					<span class="muted">Pause</span>
-					<b class="num">{restLabel}</b>
-					<button class="skip" onclick={() => (restLeft = 0)}>überspringen</button>
-				</div>
-				<div class="bar"><i style:width="{(restLeft / restTotal) * 100}%"></i></div>
-			</section>
-		{/if}
-
-		{#if !allDone && doneSets > 0}
-			<button class="finish-early muted" onclick={finish} disabled={finishing}>Training jetzt beenden ({doneSets} von {totalSets} Sätzen)</button>
-		{/if}
+		{@render restBar()}
 	</main>
+{/if}
 
-	{#if confirmLeave}
-		<div class="sheet-backdrop" role="presentation" onclick={() => (confirmLeave = false)}></div>
-		<div class="sheet tile" role="dialog" aria-modal="true" aria-labelledby="leave-title">
-			<h2 id="leave-title">Training unterbrechen?</h2>
-			<p class="muted">Deine {doneSets} Sätze sind gespeichert. Du kannst später auf „Heute“ weitermachen.</p>
-			<button class="cta" onclick={() => goto('/')}><span>Unterbrechen</span></button>
-			<button class="ghost" onclick={() => (confirmLeave = false)}>Weiter trainieren</button>
-		</div>
-	{/if}
+{#if workout && finishOpen}
+	<Sheet title="Training beenden" onclose={() => (finishOpen = false)}>
+		{#if unrated.length}
+			<p class="muted note">
+				Diese Übungen haben noch offene Sätze. Dein Gesamtfeedback wird für sie übernommen. Nimm den Haken weg, wenn du eine
+				Übung nicht gemacht hast.
+			</p>
+			<div class="unrated">
+				{#each unrated as { e, i, open } (i)}
+					<label class="urow">
+						<input
+							id="done-{i}"
+							type="checkbox"
+							checked={!skipped[i]}
+							onchange={(ev) => (skipped[i] = !(ev.currentTarget as HTMLInputElement).checked)}
+						/>
+						<span><b>{e.exercise}</b><small class="muted">{open} {open === 1 ? 'Satz' : 'Sätze'} ohne Bewertung</small></span>
+					</label>
+				{/each}
+			</div>
+		{:else}
+			<p class="muted note">Alle Sätze sind bewertet. Wie war das Training insgesamt?</p>
+		{/if}
+		<span class="q">{rpeMode ? 'RPE für das Training insgesamt' : 'Wie war das Training insgesamt?'}</span>
+		{@render effortButtons((f) => finishWith(f), (r) => finishWith(null, r), null)}
+		{#if finishing}<p class="muted note">Wird gespeichert …</p>{/if}
+	</Sheet>
+{/if}
+
+{#if confirmLeave}
+	<Sheet title="Training unterbrechen?" onclose={() => (confirmLeave = false)}>
+		<p class="muted note">Deine {doneSets} Sätze sind gespeichert. Du kannst später auf der Startseite weitermachen.</p>
+		<button class="cta center" onclick={() => goto('/')}><span>Unterbrechen</span></button>
+		<button class="ghost" onclick={() => (confirmLeave = false)}>Weiter trainieren</button>
+	</Sheet>
 {/if}
 
 <style>
 	.page {
 		padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 32px);
+	}
+	.day {
+		font-size: 36px;
+		margin-top: 2px;
+	}
+	.ex-top {
+		justify-content: flex-start;
+	}
+	.exname {
+		font-size: 40px;
+		line-height: 0.95;
+		margin-top: -4px;
+	}
+	.exlist {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.excard {
+		display: grid;
+		grid-template-columns: 36px 1fr auto;
+		align-items: center;
+		gap: 12px;
+		padding: 14px 16px;
+		border-radius: 20px;
+		text-align: left;
+		transition: box-shadow 0.2s, background-color 0.2s;
+	}
+	.exnum {
+		width: 36px;
+		height: 36px;
+		border-radius: 50%;
+		display: grid;
+		place-items: center;
+		background: var(--sf2);
+		font-weight: 700;
+		font-size: 14px;
+	}
+	.exmain {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+	.exmain b {
+		font-size: 16px;
+		font-weight: 650;
+	}
+	.exmain small {
+		font-size: 12.5px;
+		color: var(--mu);
+	}
+	.exprog {
+		font-size: 13px;
+		color: var(--mu);
+		white-space: nowrap;
+	}
+	.excard.partial {
+		box-shadow:
+			inset 0 0 0 1.5px var(--ac),
+			var(--glass-edge);
+	}
+	.excard.partial .exprog {
+		color: var(--ac-ink);
+		font-weight: 600;
+	}
+	.excard.done {
+		background: color-mix(in srgb, var(--ok) 16%, var(--glass));
+		box-shadow:
+			inset 0 0 0 1.5px color-mix(in srgb, var(--ok) 70%, transparent),
+			var(--glass-edge);
+	}
+	.excard.done .exnum {
+		background: var(--ok);
+		color: var(--bg);
+	}
+	.excard.done .exprog {
+		color: var(--ok);
+		font-weight: 600;
+	}
+	.finish {
+		margin-top: 6px;
+	}
+	.note {
+		margin: 0;
+		font-size: 13px;
+	}
+	.unrated {
+		display: flex;
+		flex-direction: column;
+		padding: 2px 14px;
+		border-radius: 16px;
+		background: var(--sf);
+	}
+	.urow {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 10px 0;
+		border-bottom: 1px solid var(--sf2);
+	}
+	.urow:last-child {
+		border: 0;
+	}
+	.urow input {
+		width: 20px;
+		height: 20px;
+		accent-color: var(--ac);
+	}
+	.urow span {
+		display: flex;
+		flex-direction: column;
+	}
+	.urow small {
+		font-size: 12px;
+	}
+	.cta.center {
+		justify-content: center;
 	}
 	.top {
 		display: flex;
@@ -371,9 +580,6 @@
 		display: block;
 		font-size: 12px;
 	}
-	.top strong {
-		font-size: 18px;
-	}
 	.round {
 		width: 40px;
 		height: 40px;
@@ -381,22 +587,6 @@
 		display: grid;
 		place-items: center;
 		flex: none;
-	}
-	.dots {
-		display: flex;
-		gap: 6px;
-	}
-	.dots button {
-		flex: 1;
-		height: 4px;
-		border-radius: 4px;
-		background: var(--sf2);
-	}
-	.dots button.done {
-		background: var(--tx);
-	}
-	.dots button.on {
-		background: var(--ac);
 	}
 	.card {
 		display: flex;
@@ -425,6 +615,10 @@
 		text-align: center;
 		min-width: 2ch;
 		max-width: 6ch;
+	}
+	.weight input::placeholder {
+		color: var(--mu);
+		opacity: 0.35;
 	}
 	.weight input:focus {
 		outline: none;
@@ -612,37 +806,5 @@
 		height: 100%;
 		background: var(--ac);
 		transition: width 1s linear;
-	}
-	.finish-early {
-		font-size: 13px;
-		padding: 8px;
-	}
-	.sheet-backdrop {
-		position: fixed;
-		inset: 0;
-		z-index: 30;
-		background: rgb(0 0 0 / 0.45);
-	}
-	.sheet {
-		position: fixed;
-		z-index: 31;
-		left: max(12px, env(safe-area-inset-left, 0px));
-		right: max(12px, env(safe-area-inset-right, 0px));
-		bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
-		max-width: 520px;
-		margin: 0 auto;
-		padding: 22px 20px 16px;
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-		border-radius: 28px;
-		background: color-mix(in srgb, var(--sf) 82%, transparent);
-	}
-	.sheet h2 {
-		margin: 0;
-		font-size: 20px;
-	}
-	.sheet p {
-		margin: 0 0 6px;
 	}
 </style>
