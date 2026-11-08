@@ -16,13 +16,14 @@ import {
 	setMaxes,
 	updateMax
 } from './loads.ts';
-import { generateSplitProgram, phaseFor } from './splits.ts';
+import { generateSplitProgram, phaseFor, volumeRamp } from './splits.ts';
 import type {
 	Bests,
 	Block,
 	Experience,
 	Feel,
 	Goal,
+	LoggedExercise,
 	MainLift,
 	Plan,
 	PlanRequest,
@@ -107,6 +108,18 @@ export function createProgram(req: PlanRequest): Program {
 	}) as Program;
 	program.engine = 'powerlifting-v2';
 	program.goal = 'powerlifting';
+	program.level = req.experience;
+	// Aufbaublock: Sätze über die Welle steigern (wie bei den Splits).
+	if (block === 'hypertrophy') {
+		program.days.forEach((day) =>
+			day.exercises.forEach((ex) => {
+				const cap = ex.lift === 'deadlift' ? 5 : ex.isMain ? 6 : 5;
+				ex.weekSets = ex.weekSets.map((sets, i) =>
+					i % 4 === 3 ? sets : Math.max(sets, Math.min(cap, sets + volumeRamp(Math.floor(i / 4), i % 4)))
+				);
+			})
+		);
+	}
 	setMaxes(
 		program,
 		{ squat: req.bests.squat ?? null, bench: req.bests.bench ?? null, deadlift: req.bests.deadlift ?? null },
@@ -308,6 +321,92 @@ export function rpeToFeel(rpe: number, targetRpe: number): Feel {
 	if (rpe <= targetRpe - 1) return 'leicht';
 	if (rpe >= targetRpe + 1) return 'hart';
 	return 'okay';
+}
+
+// ---------- Doppelte Progression ----------
+
+/** Wiederholungsspanne aus der Vorgabe: „8–12“ → [8, 12], sonst null. */
+export function repRange(reps: string | number): [number, number] | null {
+	const m = String(reps).trim().match(/^(\d+)\s*[–-]\s*(\d+)$/);
+	if (!m) return null;
+	const lo = Number(m[1]);
+	const hi = Number(m[2]);
+	return lo >= 1 && hi > lo ? [lo, hi] : null;
+}
+
+/** Kommt das Gewicht dieser Übung in dieser Woche aus einem Bestwert? */
+export function usesMaxLoad(program: Program, ex: ProgramExercise, weekIndex: number): boolean {
+	const ref = loadRef(ex);
+	return !!ref && !!expectedMax(program, ref.lift, weekIndex);
+}
+
+/** Letzte abgeschlossene Ausführung einer Übung (neueste zuerst), ohne das laufende Training. */
+export function lastPerformance(workouts: Workout[], exercise: string, excludeId?: string): LoggedExercise | null {
+	const done = workouts
+		.filter((w) => w.finishedAt && w.id !== excludeId)
+		.sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)));
+	for (const w of done) {
+		const ex = w.exercises.find((e) => e.exercise === exercise && e.sets.some((s) => s.done && s.weight && s.reps));
+		if (ex) return ex;
+	}
+	return null;
+}
+
+/** Sinnvoller Gewichtssprung: etwa 5 %, ab 40 kg in 2,5-kg-Schritten, darunter 1,25 kg (mind. 1 kg). */
+export function nextIncrement(weight: number): number {
+	if (weight >= 40) return Math.max(2.5, Math.round((weight * 0.05) / 2.5) * 2.5);
+	return Math.max(1, Math.round((weight * 0.05) / 1.25) * 1.25);
+}
+
+export interface DoubleProgressionStep {
+	weight: number;
+	/** Ziel-Wiederholungen je Satz. */
+	reps: number[];
+	/** true: oberes Ende geschafft, Gewicht steigt. */
+	increase: boolean;
+	last: { weight: number; reps: number[] };
+	hint: string;
+}
+
+/**
+ * Doppelte Progression für Übungen mit Spanne (z. B. 8–12): Gewicht halten und
+ * Wiederholungen steigern, bis alle Sätze das obere Ende bei vertretbarer Anstrengung
+ * erreichen; dann mehr Gewicht und wieder unten in der Spanne beginnen.
+ */
+export function doubleProgression(
+	range: [number, number],
+	targetSets: number,
+	targetRpe: number,
+	last: LoggedExercise
+): DoubleProgressionStep | null {
+	const [lo, hi] = range;
+	const done = last.sets.filter((s) => s.done && s.weight && s.reps);
+	if (!done.length) return null;
+	const weight = Math.max(...done.map((s) => s.weight!));
+	const work = done.filter((s) => s.weight === weight);
+	const lastReps = work.map((s) => s.reps!);
+	const enoughSets = work.length >= Math.min(targetSets, done.length);
+	// Oberes Ende in allen Arbeitssätzen, ohne deutlich über der Ziel-Anstrengung zu liegen.
+	const allTop = enoughSets && work.every((s) => s.reps! >= hi && (s.rpe == null || s.rpe <= targetRpe + 1));
+	const sets = Math.max(1, targetSets);
+	if (allTop) {
+		const next = Math.round((weight + nextIncrement(weight)) * 100) / 100;
+		return {
+			weight: next,
+			reps: Array(sets).fill(lo),
+			increase: true,
+			last: { weight, reps: lastReps },
+			hint: `Letztes Mal ${kg(weight)} kg × ${lastReps.join('/')}: oberes Ende geschafft. Heute ${kg(next)} kg, Ziel ${lo} Wdh.`
+		};
+	}
+	const reps = Array.from({ length: sets }, (_, i) => Math.min(hi, Math.max(lo, (lastReps[i] ?? lastReps[lastReps.length - 1]) + 1)));
+	return {
+		weight,
+		reps,
+		increase: false,
+		last: { weight, reps: lastReps },
+		hint: `Letztes Mal ${kg(weight)} kg × ${lastReps.join('/')}. Heute gleiches Gewicht, je eine Wiederholung mehr (bis ${hi}).`
+	};
 }
 
 // ---------- Nach dem Training ----------

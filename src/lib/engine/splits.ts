@@ -280,6 +280,15 @@ export function phaseFor(goal: Goal, block?: Block): Phase {
 	return block ?? 'strength';
 }
 
+/**
+ * Aufbaublock: Sätze steigen über die Welle und von Welle zu Welle,
+ * z. B. 3 → 3 → 4 → Entlastung, dann 3 → 4 → 4, dann 4 → 4 → 5 (höchstens +2).
+ * Mehr Volumen ist im Aufbau der wichtigste Hebel (Schoenfeld et al. 2017).
+ */
+export function volumeRamp(wave: number, inWave: number): number {
+	return Math.min(2, Math.floor((inWave + wave) / 2));
+}
+
 function buildExercise(slot: Slot, phase: Phase, level: Experience, weeks: number): ProgramExercise {
 	const [pattern, role, variant] = slot;
 	const options = POOL[pattern];
@@ -294,7 +303,8 @@ function buildExercise(slot: Slot, phase: Phase, level: Experience, weeks: numbe
 		const inWave = i % 4;
 		const deload = inWave === 3;
 		const sets = rx.sets[level];
-		weekSets.push(deload ? Math.max(1, Math.round(sets * 0.6)) : sets);
+		const ramped = phase === 'hypertrophy' ? Math.min(6, sets + volumeRamp(wave, inWave)) : sets;
+		weekSets.push(deload ? Math.max(1, Math.round(sets * 0.6)) : ramped);
 		weekReps.push(rx.reps(wave));
 		weekRpes.push(deload ? rx.rpe[3] : Math.min(rx.cap, rx.rpe[inWave] + 0.5 * wave));
 	}

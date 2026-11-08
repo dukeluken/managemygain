@@ -4,7 +4,19 @@
 	import { workoutId } from '#lib/data/repo.ts';
 	import { session } from '#lib/data/session.svelte.ts';
 	import type { Feel, LoggedExercise, Workout } from '#lib/data/types.ts';
-	import { dayPrescription, dayTitle, feelToRpe, isoDate, kg, rpeLabel, rpeToFeel } from '#lib/engine/index.ts';
+	import {
+		dayPrescription,
+		dayTitle,
+		doubleProgression,
+		feelToRpe,
+		isoDate,
+		kg,
+		lastPerformance,
+		repRange,
+		rpeLabel,
+		rpeToFeel,
+		usesMaxLoad
+	} from '#lib/engine/index.ts';
 	import Icon from '#lib/ui/Icon.svelte';
 	import { onDestroy } from 'svelte';
 
@@ -23,21 +35,36 @@
 		if (!plan || !day || !session.user) return null;
 		const existing = session.workouts.find((w) => w.weekIndex === weekIndex && w.dayIndex === dayIndex);
 		if (existing) return structuredClone($state.snapshot(existing)) as Workout;
-		const exercises: LoggedExercise[] = dayPrescription(plan.program, weekIndex, dayIndex).map((p) => ({
-			exercise: p.exercise,
-			lift: p.lift,
-			isMain: p.isMain,
-			target: { sets: p.sets, reps: p.reps, rpe: p.rpe, weight: p.weight },
-			sets: Array.from({ length: p.sets }, () => ({
-				weight: p.weight,
-				reps: firstNumber(p.reps),
-				feel: null,
-				rpe: null,
-				done: false
-			}))
-		}));
+		const id = workoutId(plan.id, weekIndex, dayIndex);
+		const exercises: LoggedExercise[] = dayPrescription(plan.program, weekIndex, dayIndex).map((p, i) => {
+			const range = repRange(p.reps);
+			const source = day.exercises[i];
+			// Doppelte Progression für Spannen (z. B. 8–12), wenn das Gewicht nicht aus einem
+			// Bestwert berechnet wird: Gewicht und Wiederholungen aus dem letzten Mal ableiten.
+			const last = range && !usesMaxLoad(plan.program, source, weekIndex) ? lastPerformance(session.workouts, p.exercise, id) : null;
+			const dp = range && last ? doubleProgression(range, p.sets, p.rpe, last) : null;
+			const weight = dp?.weight ?? p.weight;
+			const hint =
+				dp?.hint ??
+				(range && !usesMaxLoad(plan.program, source, weekIndex)
+					? `Wähle ein Gewicht für etwa ${range[0]} Wdh. Schaffst du in allen Sätzen ${range[1]}, gibt es beim nächsten Mal mehr Gewicht.`
+					: undefined);
+			return {
+				exercise: p.exercise,
+				lift: p.lift,
+				isMain: p.isMain,
+				target: { sets: p.sets, reps: p.reps, rpe: p.rpe, weight, ...(hint ? { hint } : {}) },
+				sets: Array.from({ length: p.sets }, (_, k) => ({
+					weight,
+					reps: dp?.reps[k] ?? firstNumber(p.reps),
+					feel: null,
+					rpe: null,
+					done: false
+				}))
+			};
+		});
 		return {
-			id: workoutId(plan.id, weekIndex, dayIndex),
+			id,
 			ownerId: session.user.uid,
 			planId: plan.id,
 			weekIndex,
@@ -222,6 +249,9 @@
 						? ` · ${kg(ex.target.weight)} kg`
 						: ''} · <b class="rpe">RPE {rpeLabel(ex.target.rpe)}</b>
 				</div>
+				{#if ex.target.hint}
+					<p class="dp" class:up={ex.target.hint.includes('geschafft')}>{ex.target.hint}</p>
+				{/if}
 				<label class="weight">
 					<input
 						id="weight"
@@ -481,6 +511,18 @@
 		color: var(--ac-ink);
 		font-weight: 600;
 		white-space: nowrap;
+	}
+	.dp {
+		margin: 0;
+		font-size: 12.5px;
+		line-height: 1.4;
+		text-align: center;
+		color: var(--mu);
+		max-width: 34ch;
+	}
+	.dp.up {
+		color: var(--ok);
+		font-weight: 600;
 	}
 	.target .rpe {
 		color: var(--tx);

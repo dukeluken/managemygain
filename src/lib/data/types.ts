@@ -135,7 +135,7 @@ export interface LoggedExercise {
 	exercise: string;
 	lift: MainLift | null;
 	isMain: boolean;
-	target: { sets: number; reps: string; rpe: number; weight: number | null };
+	target: { sets: number; reps: string; rpe: number; weight: number | null; hint?: string };
 	sets: LoggedSet[];
 }
 
