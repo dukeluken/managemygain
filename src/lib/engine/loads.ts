@@ -91,14 +91,51 @@ export function expectedMax(program: Program, lift: MainLift, weekIndex: number)
 	return max + growth * Math.max(0, weekIndex - anchor);
 }
 
-export function plannedLoad(program: Program, ex: ProgramExercise, weekIndex: number): number | null {
-	const ref = loadRef(ex);
-	if (!ref) return null;
-	const max = expectedMax(program, ref.lift, weekIndex);
+/** Anteil am Maximum für die Vorgabe einer Woche (Wdh. + Ziel-RPE), oder null. */
+function weekPercent(ex: ProgramExercise, weekIndex: number): number | null {
 	const reps = repsForLoad(ex.weekReps?.[weekIndex] ?? '');
 	const rpe = Number(ex.weekRpes?.[weekIndex]) || 7;
-	if (!max || !reps) return null;
-	return round(max * pl.rpePercent(reps, rpe) * ref.factor, Number(program.rounding) || 2.5);
+	return reps ? pl.rpePercent(reps, rpe) : null;
+}
+
+/** Eigenes Startgewicht einer Übung ohne Bestwert-Bezug, ab dem die Progression läuft. */
+export interface LoadAnchor {
+	week: number;
+	weight: number;
+}
+
+/**
+ * Ungerundetes Gewicht einer Woche ohne den persönlichen Faktor:
+ * - mit Bestwert: erwartetes 1RM × RPE-Tabelle × Faktor der Übung
+ * - mit eigenem Startgewicht (anchor): Startgewicht × Verhältnis der RPE-Tabelle
+ *   zur Startwoche × erwartete Wochensteigerung. So steigen auch Assistenzübungen
+ *   mit der Welle und werden in Entlastungswochen leichter.
+ */
+export function rawLoad(program: Program, ex: ProgramExercise, weekIndex: number): number | null {
+	const ref = loadRef(ex);
+	const max = ref ? expectedMax(program, ref.lift, weekIndex) : null;
+	const p = weekPercent(ex, weekIndex);
+	if (ref && max && p) return max * p * ref.factor;
+	const anchor = ex.anchor as LoadAnchor | undefined;
+	if (anchor && weekIndex >= anchor.week) {
+		const p0 = weekPercent(ex, anchor.week);
+		if (!p || !p0) return null;
+		// Assistenzübungen steigern sich prozentual schneller als das Maximum der Grundübungen.
+		const growth = 2 * (WEEKLY_GROWTH[(program.level as Experience) ?? 'intermediate'] ?? WEEKLY_GROWTH.intermediate);
+		return anchor.weight * (p / p0) * (1 + growth * (weekIndex - anchor.week));
+	}
+	return null;
+}
+
+export function plannedLoad(program: Program, ex: ProgramExercise, weekIndex: number): number | null {
+	const raw = rawLoad(program, ex, weekIndex);
+	if (raw == null) return null;
+	const anchor = ex.anchor as LoadAnchor | undefined;
+	const fromMax = loadRef(ex) && expectedMax(program, loadRef(ex)!.lift, weekIndex);
+	if (fromMax) return round(raw * (Number(ex.loadScale) || 1), Number(program.rounding) || 2.5);
+	// Eigenes Startgewicht: in der Startwoche exakt, danach fein gerundet (kleine Hanteln).
+	if (anchor && weekIndex === anchor.week) return anchor.weight;
+	return round(raw, raw < 20 ? 1 : 1.25);
 }
 
 /** Gewichte einer Übung ab `fromWeek` neu berechnen; eigene Werte bleiben. */

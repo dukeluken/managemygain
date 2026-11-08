@@ -71,6 +71,10 @@ export interface ProgramExercise {
 	loadFactor?: number | null;
 	/** Rolle im Tag: Grundübung, Volumen der Grundübung, Ergänzung, Isolation. */
 	role?: 'main' | 'volume' | 'secondary' | 'accessory';
+	/** Persönlicher Faktor auf berechnete Gewichte (aus einem eigenen Gewicht über mehrere Wochen). */
+	loadScale?: number;
+	/** Eigenes Startgewicht ohne Bestwert-Bezug; die folgenden Wochen steigern sich davon. */
+	anchor?: { week: number; weight: number };
 	[key: string]: unknown;
 }
 

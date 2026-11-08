@@ -12,6 +12,7 @@ import {
 	applyLoadsToProgram,
 	expectedMax,
 	loadRef,
+	rawLoad,
 	setMaxes,
 	updateMax
 } from './loads.ts';
@@ -206,6 +207,16 @@ export function dayPrescription(program: Program, weekIndex: number, dayIndex: n
 	return day ? day.exercises.map((ex) => prescribe(ex, weekIndex)) : [];
 }
 
+/** RPE lesbar, z. B. 7,5. */
+export function rpeLabel(rpe: number): string {
+	return String(Math.round(rpe * 2) / 2).replace('.', ',');
+}
+
+/** Vorgabe kurz: „4 × 5 · 100 kg · RPE 7,5“. */
+export function amountLabel(p: { sets: number; reps: string; weight: number | null; rpe: number }): string {
+	return `${p.sets} × ${p.reps}${p.weight ? ` · ${kg(p.weight)} kg` : ''} · RPE ${rpeLabel(p.rpe)}`;
+}
+
 /** Lesbarer Titel aus den Hauptübungen des Tages, z. B. „Kniebeuge & Bankdrücken“. */
 export function dayTitle(day: ProgramDay): string {
 	if (day.title) return day.title;
@@ -290,6 +301,13 @@ export function feelToRpe(feel: Feel, targetRpe: number): number {
 	if (feel === 'leicht') return Math.max(6, targetRpe - 1.5);
 	if (feel === 'hart') return Math.min(10, targetRpe + 1.5);
 	return targetRpe;
+}
+
+/** RPE-Zahl → leicht/okay/hart relativ zur Vorgabe (für Anzeige und Verlauf). */
+export function rpeToFeel(rpe: number, targetRpe: number): Feel {
+	if (rpe <= targetRpe - 1) return 'leicht';
+	if (rpe >= targetRpe + 1) return 'hart';
+	return 'okay';
 }
 
 // ---------- Nach dem Training ----------
@@ -416,11 +434,39 @@ function describe(item: CatalogItem) {
 export interface ExercisePatch {
 	sets?: number;
 	reps?: string;
+	/** Ziel-RPE (Anstrengung 1–10). */
+	rpe?: number;
 	/** Zahl = eigenes Gewicht, null = automatisch aus dem Plan. */
 	weight?: number | null;
 }
 
-/** Sätze, Wiederholungen oder Gewicht für die Wochen [from, to) ändern. */
+/** Untere Grenze einer Wiederholungsangabe („8“ → 8, „8–12“ → 8). */
+function repsLow(reps: string | number): number | null {
+	const n = Number.parseInt(String(reps), 10);
+	return Number.isFinite(n) ? n : null;
+}
+
+/** Wiederholungen um `delta` verschieben, Spannen als Ganzes. */
+export function shiftReps(reps: string | number, delta: number): string | number {
+	const text = String(reps).trim();
+	const range = text.match(/^(\d+)\s*[–-]\s*(\d+)$/);
+	if (range) {
+		const lo = Number(range[1]) + delta;
+		const hi = Number(range[2]) + delta;
+		return lo >= 1 ? `${lo}–${hi}` : reps;
+	}
+	if (/^\d+$/.test(text)) return Math.max(1, Number(text) + delta);
+	return reps;
+}
+
+/**
+ * Sätze, Wiederholungen, RPE oder Gewicht für die Wochen [from, to) ändern.
+ *
+ * Eine Woche: der Wert gilt genau so.
+ * Mehrere Wochen: die Änderung wird als Verschiebung übertragen, damit die Progression
+ * (steigende RPE, sinkende Wiederholungen, Entlastungswochen) erhalten bleibt. Ein eigenes
+ * Gewicht wird zum Startpunkt der Steigerung statt zu einem festen Wert für alle Wochen.
+ */
 export function editExercise(
 	program: Program,
 	dayIndex: number,
@@ -434,19 +480,116 @@ export function editExercise(
 	const weeks = weekCount(program);
 	ex.weekSets = fill(ex.weekSets, weeks, ex.weekSets?.[ex.weekSets.length - 1] ?? 3);
 	ex.weekReps = fill(ex.weekReps, weeks, ex.weekReps?.[ex.weekReps.length - 1] ?? '8');
+	ex.weekRpes = fill(ex.weekRpes, weeks, ex.weekRpes?.[ex.weekRpes.length - 1] ?? 7);
 	ex.weekWeights = fill(ex.weekWeights, weeks, '');
 	ex.weekWeightOverrides = fill(ex.weekWeightOverrides, weeks, false);
-	const end = Math.min(weeks, to);
-	for (let i = Math.max(0, from); i < end; i++) {
-		if (patch.sets != null) ex.weekSets[i] = Math.max(1, Math.min(20, Math.round(patch.sets)));
-		if (patch.reps != null && patch.reps.trim()) ex.weekReps[i] = patch.reps.trim().slice(0, 12);
-		if (patch.weight !== undefined) {
-			ex.weekWeightOverrides[i] = patch.weight !== null;
-			if (patch.weight !== null) ex.weekWeights[i] = Math.max(0, patch.weight);
+	const start = Math.max(0, from);
+	const end = Math.min(weeks, Math.max(to, start + 1));
+	const single = end - start === 1;
+	const range = Array.from({ length: end - start }, (_, k) => start + k);
+	const deload = (i: number) => isDeload(program, i);
+
+	if (patch.sets != null) {
+		const target = Math.max(1, Math.min(20, Math.round(patch.sets)));
+		const delta = target - (Number(ex.weekSets[start]) || 0);
+		for (const i of range) {
+			if (single) ex.weekSets[i] = target;
+			// Entlastungswochen bekommen nur einen Teil der Änderung.
+			else ex.weekSets[i] = Math.max(1, Math.min(20, ex.weekSets[i] + (deload(i) && i !== start ? Math.round(delta * 0.6) : delta)));
 		}
 	}
-	// Wiederholungen bestimmen bei Hauptübungen das Gewicht: neu berechnen.
-	if (patch.reps != null || patch.weight === null) recompute(program, ex, from);
+
+	if (patch.reps != null && patch.reps.trim()) {
+		const value = patch.reps.trim().slice(0, 12);
+		const oldLow = repsLow(ex.weekReps[start]);
+		const newLow = repsLow(value);
+		const delta = oldLow != null && newLow != null ? newLow - oldLow : null;
+		for (const i of range) {
+			if (single || delta === null) ex.weekReps[i] = value;
+			else if (i === start) ex.weekReps[i] = value;
+			else ex.weekReps[i] = shiftReps(ex.weekReps[i], delta);
+		}
+	}
+
+	if (patch.rpe != null) {
+		const target = Math.max(5, Math.min(10, Math.round(patch.rpe * 2) / 2));
+		const delta = target - (Number(ex.weekRpes[start]) || target);
+		for (const i of range) {
+			if (single || i === start) ex.weekRpes[i] = target;
+			// Entlastungswochen bleiben leicht.
+			else if (!deload(i)) ex.weekRpes[i] = Math.max(5, Math.min(10, ex.weekRpes[i] + delta));
+		}
+	}
+
+	if (patch.weight !== undefined) {
+		const ref = loadRef(ex);
+		if (patch.weight === null) {
+			for (const i of range) ex.weekWeightOverrides[i] = false;
+			if (!single) {
+				delete ex.loadScale;
+				delete ex.anchor;
+			}
+		} else if (single) {
+			ex.weekWeightOverrides[start] = true;
+			ex.weekWeights[start] = Math.max(0, patch.weight);
+		} else {
+			for (const i of range) ex.weekWeightOverrides[i] = false;
+			const weight = Math.max(0, patch.weight);
+			// Mit Bestwert: persönlicher Faktor auf die berechneten Gewichte.
+			delete ex.loadScale;
+			delete ex.anchor;
+			const base = ref ? rawLoad(program, ex, start) : null;
+			if (ref && base) ex.loadScale = weight / base;
+			else ex.anchor = { week: start, weight };
+		}
+	}
+
+	recompute(program, ex, start);
+}
+
+// ---------- Plan anpassen ----------
+
+/**
+ * Planlänge ändern. Neue Wochen setzen die Vier-Wochen-Welle fort (Woche 4, 8, …
+ * Entlastung) und übernehmen die Vorgaben der entsprechenden Woche davor; die
+ * Gewichte steigen über die erwartete Entwicklung des Maximums weiter.
+ */
+export function setPlanLength(program: Program, weeks: number) {
+	const old = weekCount(program);
+	const target = Math.max(4, Math.min(52, Math.round(weeks)));
+	if (target === old) return;
+	const types = fill(program.weekTypes, old, 'regular' as 'regular' | 'deload');
+	for (let i = old; i < target; i++) types[i] = i % 4 === 3 ? 'deload' : 'regular';
+	program.weekTypes = types.slice(0, target);
+	program.cycleWeeks = target;
+	program.days.forEach((day) =>
+		day.exercises.forEach((ex) => {
+			const src = (list: unknown[] | undefined, i: number) => {
+				const arr = Array.isArray(list) ? list : [];
+				return arr[i - 4 >= 0 ? i - 4 : Math.max(0, arr.length - 1)];
+			};
+			for (const key of ['weekSets', 'weekReps', 'weekRpes'] as const) {
+				const arr = [...((ex[key] as unknown[]) ?? [])].slice(0, target);
+				for (let i = arr.length; i < target; i++) arr.push(src(arr, i));
+				(ex as Record<string, unknown>)[key] = arr;
+			}
+			ex.weekWeights = fill(ex.weekWeights, old, '').slice(0, target);
+			ex.weekWeightOverrides = fill(ex.weekWeightOverrides, old, false).slice(0, target);
+			while (ex.weekWeights.length < target) ex.weekWeights.push('');
+			while (ex.weekWeightOverrides.length < target) ex.weekWeightOverrides.push(false);
+		})
+	);
+	if (target > old) program.days.forEach((day) => day.exercises.forEach((ex) => recompute(program, ex, old)));
+}
+
+export function renameDay(program: Program, dayIndex: number, title: string) {
+	const day = program.days[dayIndex];
+	if (!day) return;
+	const clean = title.trim().slice(0, 40);
+	if (clean) day.title = clean;
+	// Leer: ursprünglicher Name (Splits: „Oberkörper A“, Powerlifting: aus den Hauptübungen).
+	else if (program.engine === 'splits-v1') day.title = day.name;
+	else delete day.title;
 }
 
 /** Übung austauschen. Name gilt für den ganzen Plan, Gewichte werden ab `fromWeek` neu berechnet. */

@@ -4,6 +4,7 @@ import {
 	collection,
 	doc,
 	getDoc,
+	getDocs,
 	onSnapshot,
 	query,
 	setDoc,
@@ -83,6 +84,35 @@ export async function createPlanFromRequest(uid: string, req: PlanRequest, start
 	);
 	await batch.commit();
 	return plan;
+}
+
+/** Alle Pläne des Nutzers, neueste zuerst. */
+export function watchPlans(uid: string, cb: (plans: Plan[]) => void): Unsubscribe {
+	return onSnapshot(plansCol(uid), (snap) =>
+		cb(
+			snap.docs
+				.map((d) => d.data() as Plan)
+				.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+		)
+	);
+}
+
+/** Name und/oder Programm eines Plans speichern. */
+export function updatePlan(uid: string, planId: string, patch: Partial<Pick<Plan, 'name' | 'program'>>) {
+	return updateDoc(doc(plansCol(uid), planId), { ...patch, updatedAt: now() });
+}
+
+/**
+ * Plan samt seiner Trainings löschen. Ist er aktiv, wird `nextActiveId` aktiv
+ * (oder keiner).
+ */
+export async function deletePlan(uid: string, planId: string, nextActiveId?: string | null) {
+	const workouts = await getDocs(query(workoutsCol(uid), where('planId', '==', planId)));
+	const batch = writeBatch(db);
+	workouts.docs.forEach((d) => batch.delete(d.ref));
+	batch.delete(doc(plansCol(uid), planId));
+	if (nextActiveId !== undefined) batch.update(profileRef(uid), { activePlanId: nextActiveId, updatedAt: now() });
+	await batch.commit();
 }
 
 /** Programm eines Plans speichern (nach dem Bearbeiten). */

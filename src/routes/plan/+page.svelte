@@ -8,11 +8,11 @@
 		blockDescription,
 		blockOf,
 		addExercise,
+		amountLabel,
 		dayPrescription,
 		dayTitle,
 		exerciseCatalog,
 		isDeload,
-		kg,
 		moveDay,
 		weekCount,
 		weekIndexAt,
@@ -21,6 +21,7 @@
 	import ExerciseEditor from '#lib/ui/ExerciseEditor.svelte';
 	import ExercisePicker from '#lib/ui/ExercisePicker.svelte';
 	import Icon from '#lib/ui/Icon.svelte';
+	import PlanSettings from '#lib/ui/PlanSettings.svelte';
 	import Sheet from '#lib/ui/Sheet.svelte';
 
 	const today = new Date();
@@ -34,6 +35,7 @@
 	let editing = $state<{ dayIndex: number; exIndex: number } | null>(null);
 	let adding = $state<number | null>(null);
 	let movingDay = $state<number | null>(null);
+	let settings = $state(false);
 
 	const slots = $derived(plan ? weekSlots(plan, session.workouts, week, today) : []);
 	const nextDeload = $derived(
@@ -49,9 +51,6 @@
 		rest: ''
 	};
 
-	function amount(p: { sets: number; reps: string; weight: number | null }) {
-		return `${p.sets} × ${p.reps}${p.weight ? ` · ${kg(p.weight)} kg` : ''}`;
-	}
 </script>
 
 <main class="page">
@@ -114,7 +113,7 @@
 							{#each dayPrescription(plan.program, week, dayIndex) as p, exIndex (exIndex)}
 								<button class="ex" onclick={() => (editing = { dayIndex, exIndex })}>
 									<span class="name">{p.exercise}</span>
-									<span class="num muted amount">{amount(p)}</span>
+									<span class="num muted amount">{amountLabel(p)}</span>
 									<Icon name="edit" size={16} />
 								</button>
 							{/each}
@@ -131,8 +130,13 @@
 			{/each}
 		</section>
 		<p class="muted hint">{blockDescription(plan)}. Tippe auf einen Tag und dann auf eine Übung, um sie zu ändern.</p>
+		<button class="ghost adjust" onclick={() => (settings = true)}><Icon name="edit" size={18} />Plan anpassen</button>
 	{/if}
 </main>
+
+{#if plan && settings}
+	<PlanSettings {plan} onclose={() => (settings = false)} />
+{/if}
 
 {#if plan && editing}
 	<ExerciseEditor
@@ -325,6 +329,10 @@
 	.hint {
 		margin: 0;
 		font-size: 13px;
+	}
+	.adjust {
+		align-self: stretch;
+		padding: 15px 20px;
 	}
 	.note {
 		margin: 0;

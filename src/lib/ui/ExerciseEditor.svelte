@@ -1,10 +1,14 @@
 <script lang="ts">
-	// Übung im Plan bearbeiten: Sätze, Wiederholungen, Gewicht für eine oder alle
-	// folgenden Wochen; außerdem tauschen, verschieben, entfernen.
+	// Übung im Plan bearbeiten: Sätze, Wiederholungen, RPE, Gewicht für eine Woche oder
+	// ab dieser Woche bis Planende (dann mit erhaltener Progression); außerdem tauschen,
+	// verschieben, entfernen.
 	import { session } from '#lib/data/session.svelte.ts';
 	import type { Program } from '#lib/data/types.ts';
 	import {
+		amountLabel,
 		editExercise,
+		isDeload,
+		rpeLabel,
 		exerciseCatalog,
 		kg,
 		hasCalculatedLoad,
@@ -29,7 +33,7 @@
 	}: { program: Program; dayIndex: number; exIndex: number; week: number; onclose: () => void } = $props();
 
 	// Werte beim Öffnen als Momentaufnahme übernehmen (das Sheet wird pro Übung neu geöffnet).
-	const { ex, p, weeks, isLift, overridden, count } = untrack(() => {
+	const { ex, p, weeks, isLift, overridden, personal, count } = untrack(() => {
 		const ex = program.days[dayIndex].exercises[exIndex];
 		return {
 			ex,
@@ -37,6 +41,7 @@
 			weeks: weekCount(program),
 			isLift: hasCalculatedLoad(ex),
 			overridden: Boolean(ex.weekWeightOverrides?.[week]),
+			personal: Boolean(ex.loadScale && ex.loadScale !== 1),
 			count: program.days[dayIndex].exercises.length
 		};
 	});
@@ -45,7 +50,8 @@
 	let scope = $state<'week' | 'rest'>('rest');
 	let sets = $state(p.sets);
 	let reps = $state(p.reps);
-	let auto = $state(isLift && !overridden);
+	let rpe = $state(p.rpe);
+	let auto = $state(isLift && !overridden && !personal);
 	let weightText = $state(p.weight != null ? kg(p.weight) : '');
 	let confirmDelete = $state(false);
 	let keypadOpen = $state(false);
@@ -81,7 +87,7 @@
 
 	/** undefined = Gewicht nicht anfassen, null = automatisch/leer, Zahl = eigenes Gewicht. */
 	function weightPatch(): number | null | undefined {
-		if (isLift && auto) return overridden ? null : undefined;
+		if (isLift && auto) return overridden || personal ? null : undefined;
 		const text = weightText.trim();
 		if (text === '') return p.weight != null || overridden ? null : undefined;
 		const n = Number(text.replace(',', '.'));
@@ -90,15 +96,30 @@
 		return n === p.weight && (overridden || !isLift) ? undefined : n;
 	}
 
+	function patch() {
+		return {
+			sets: sets !== p.sets ? sets : undefined,
+			reps: reps.trim() !== p.reps ? reps : undefined,
+			rpe: rpe !== p.rpe ? rpe : undefined,
+			weight: weightPatch()
+		};
+	}
+	const to = $derived(scope === 'week' ? week + 1 : lastWeek);
+
+	// Vorschau: so sehen die nächsten Wochen nach dem Speichern aus.
+	const preview = $derived.by(() => {
+		const copy = structuredClone($state.snapshot(program)) as Program;
+		editExercise(copy, dayIndex, exIndex, week, to, patch());
+		const last = Math.min(weeks, week + 6);
+		return Array.from({ length: last - week }, (_, k) => week + k).map((w) => ({
+			week: w,
+			deload: isDeload(copy, w),
+			label: amountLabel(prescribe(copy.days[dayIndex].exercises[exIndex], w))
+		}));
+	});
+
 	function save() {
-		const to = scope === 'week' ? week + 1 : lastWeek;
-		session.editPlan((prog) =>
-			editExercise(prog, dayIndex, exIndex, week, to, {
-				sets: sets !== p.sets ? sets : undefined,
-				reps: reps.trim() !== p.reps ? reps : undefined,
-				weight: weightPatch()
-			})
-		);
+		session.editPlan((prog) => editExercise(prog, dayIndex, exIndex, week, to, patch()));
 		onclose();
 	}
 
@@ -151,6 +172,14 @@
 					<button onclick={() => stepReps(1)} aria-label="Eine Wiederholung mehr"><Icon name="plus" size={18} /></button>
 				</div>
 			</div>
+			<div class="field">
+				<span>RPE <small class="muted">Anstrengung</small></span>
+				<div class="stepper">
+					<button onclick={() => (rpe = Math.max(5, rpe - 0.5))} aria-label="RPE 0,5 weniger"><Icon name="minus" size={18} /></button>
+					<b class="display num">{rpeLabel(rpe)}</b>
+					<button onclick={() => (rpe = Math.min(10, rpe + 0.5))} aria-label="RPE 0,5 mehr"><Icon name="plus" size={18} /></button>
+				</div>
+			</div>
 			<div class="field col">
 				<div class="row">
 					<span>Gewicht</span>
@@ -171,6 +200,22 @@
 				{/if}
 			</div>
 		</div>
+
+		<section class="preview" aria-label="Vorschau">
+			<span class="muted note">
+				{scope === 'week'
+					? 'Gilt nur für diese Woche.'
+					: 'Änderungen werden auf die Folgewochen übertragen, die Steigerung bleibt erhalten.'}
+			</span>
+			<div class="weeks">
+				{#each preview as row (row.week)}
+					<div class="pw" class:cur={row.week === week} class:dl={row.deload}>
+						<span class="w">W{row.week + 1}{row.deload ? ' · leicht' : ''}</span>
+						<span class="num">{row.label}</span>
+					</div>
+				{/each}
+			</div>
+		</section>
 
 		<button class="cta" onclick={save}><span>Speichern</span></button>
 
@@ -216,6 +261,40 @@
 	.note {
 		margin: 0;
 		font-size: 13px;
+	}
+	.preview {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.weeks {
+		display: flex;
+		flex-direction: column;
+		padding: 4px 14px;
+		border-radius: 16px;
+		background: color-mix(in srgb, var(--sf2) 50%, transparent);
+		font-size: 13px;
+	}
+	.pw {
+		display: flex;
+		justify-content: space-between;
+		gap: 10px;
+		padding: 6px 0;
+		color: var(--mu);
+	}
+	.pw.cur {
+		color: var(--tx);
+		font-weight: 600;
+	}
+	.pw.dl .w {
+		color: var(--ok);
+	}
+	.pw .w {
+		white-space: nowrap;
+	}
+	.field small {
+		font-weight: 400;
+		font-size: 12px;
 	}
 	.seg {
 		display: grid;

@@ -8,10 +8,12 @@
 		estimatedMax,
 		kg,
 		liftsForGoal,
+		parseIsoDate,
 		weekCount,
 		weekIndexAt
 	} from '#lib/engine/index.ts';
 	import BestField from '#lib/ui/BestField.svelte';
+	import Icon from '#lib/ui/Icon.svelte';
 	import Sheet from '#lib/ui/Sheet.svelte';
 	import { applyTheme, getThemePref } from '#lib/ui/theme.ts';
 
@@ -23,7 +25,21 @@
 
 	const plan = $derived(session.plan);
 	const finished = $derived(session.workouts.filter((w) => w.finishedAt).length);
-	let confirmNew = $state(false);
+	// Alle Pläne; solange die Liste lädt, wenigstens der aktive.
+	const plans = $derived(session.plans.length ? session.plans : plan ? [plan] : []);
+	let confirmDelete = $state<string | null>(null);
+	let deleting = $state(false);
+	async function remove(id: string) {
+		deleting = true;
+		try {
+			await session.deletePlan(id);
+		} catch (e) {
+			console.warn(e);
+			session.error = 'Plan konnte nicht gelöscht werden. Prüfe die Verbindung.';
+		}
+		deleting = false;
+		confirmDelete = null;
+	}
 
 	// Bestwerte: eigene Werte aus dem Profil, daneben die aktuelle Schätzung des Plans.
 	const lifts = $derived(plan ? liftsForGoal(plan.goal) : ALL_LIFTS);
@@ -76,25 +92,70 @@
 		<p class="muted note">Alle Gewichte im Plan werden aus diesen Werten berechnet. Änderungen gelten ab dieser Woche.</p>
 	</section>
 
-	{#if plan}
-		<section>
-			<div class="eyebrow head"><span>Aktueller Plan</span></div>
-			<div class="tile rows">
-				<div class="row"><span>{plan.name}</span><span class="muted num">{finished} Trainings</span></div>
-				{#if confirmNew}
-					<div class="row confirm">
-						<span class="muted">Der aktuelle Plan bleibt gespeichert, aktiv wird der neue.</span>
-						<div class="btns">
-							<button class="ghost" onclick={() => (confirmNew = false)}>Abbrechen</button>
-							<button class="cta small" onclick={() => goto('/start')}><span>Neuen Plan erstellen</span></button>
-						</div>
+	<section>
+		<div class="eyebrow head"><span>Meine Pläne</span><span>{plans.length}</span></div>
+		<div class="tile rows">
+			{#each plans as p (p.id)}
+				{@const active = p.id === session.profile?.activePlanId}
+				<div class="plan" class:active>
+					<div class="pinfo">
+						<span class="pname">{p.name}</span>
+						<small class="muted">
+							{weekCount(p.program)} Wochen · {p.program.days.length} Tage · seit {parseIsoDate(p.startDate).toLocaleDateString('de-DE', {
+								day: 'numeric',
+								month: 'short',
+								year: 'numeric'
+							})}
+						</small>
 					</div>
-				{:else}
-					<button class="row link" onclick={() => (confirmNew = true)}>Neuen Plan erstellen</button>
-				{/if}
-			</div>
-		</section>
-	{/if}
+					{#if confirmDelete === p.id}
+						<div class="confirm">
+							<span class="muted">Plan und alle zugehörigen Trainings löschen?</span>
+							<div class="btns">
+								<button class="ghost" onclick={() => (confirmDelete = null)}>Abbrechen</button>
+								<button class="ghost danger" onclick={() => remove(p.id)} disabled={deleting}>
+									{deleting ? 'Wird gelöscht …' : 'Löschen'}
+								</button>
+							</div>
+						</div>
+					{:else}
+						<div class="pactions">
+							{#if active}
+								<span class="badge">Aktiv</span>
+							{:else}
+								<button class="small-btn" onclick={() => session.setActivePlan(p.id)}>Aktivieren</button>
+							{/if}
+							<button class="icon-btn" onclick={() => (confirmDelete = p.id)} aria-label="{p.name} löschen"
+								><Icon name="trash" size={16} /></button
+							>
+						</div>
+					{/if}
+				</div>
+			{:else}
+				<p class="muted empty">Noch kein Plan.</p>
+			{/each}
+			<a class="row link" href="/start">+ Neuen Plan erstellen</a>
+		</div>
+		<p class="muted note">Ein neuer Plan wird aktiv, die anderen bleiben gespeichert.</p>
+	</section>
+
+	<section>
+		<div class="eyebrow head"><span>Anstrengung im Training</span></div>
+		<div class="seg tile" role="radiogroup" aria-label="Anstrengung erfassen">
+			<button
+				role="radio"
+				aria-checked={session.profile?.effortScale !== 'rpe'}
+				class:sel={session.profile?.effortScale !== 'rpe'}
+				onclick={() => session.setEffortScale('simple')}>leicht / okay / hart</button
+			>
+			<button
+				role="radio"
+				aria-checked={session.profile?.effortScale === 'rpe'}
+				class:sel={session.profile?.effortScale === 'rpe'}
+				onclick={() => session.setEffortScale('rpe')}>RPE</button
+			>
+		</div>
+	</section>
 
 	<section>
 		<div class="eyebrow head"><span>Darstellung</span></div>
@@ -158,6 +219,75 @@
 		margin: 8px 0 0;
 		font-size: 13px;
 	}
+	.plan {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: space-between;
+		align-items: center;
+		gap: 10px;
+		padding: 14px 0;
+		border-bottom: 1px solid var(--sf2);
+	}
+	.pinfo {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+	.pname {
+		font-weight: 600;
+	}
+	.plan.active .pname {
+		color: var(--ac-ink);
+	}
+	.pinfo small {
+		font-size: 12px;
+	}
+	.pactions {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.badge {
+		font-size: 12px;
+		font-weight: 700;
+		padding: 5px 10px;
+		border-radius: 999px;
+		background: var(--ac);
+		color: var(--on-ac);
+	}
+	.small-btn {
+		font-size: 13px;
+		font-weight: 600;
+		padding: 7px 12px;
+		border-radius: 999px;
+		background: var(--sf2);
+	}
+	.icon-btn {
+		width: 34px;
+		height: 34px;
+		border-radius: 50%;
+		display: grid;
+		place-items: center;
+		background: var(--sf2);
+		color: var(--mu);
+	}
+	.plan .confirm {
+		flex-basis: 100%;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.danger {
+		color: var(--danger);
+	}
+	.empty {
+		margin: 0;
+		padding: 14px 0;
+	}
+	a.link {
+		text-decoration: none;
+	}
 	.sheet-fields {
 		padding: 0 16px;
 		border-radius: var(--r-tile);
@@ -197,10 +327,6 @@
 	}
 	.btns > * {
 		flex: 1;
-	}
-	.cta.small {
-		padding: 13px 18px;
-		justify-content: center;
 	}
 	.seg {
 		display: grid;

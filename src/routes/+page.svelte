@@ -19,6 +19,7 @@
 		progressSeries,
 		weekCount,
 		weekIndexAt,
+		rpeLabel,
 		weekSlots
 	} from '#lib/engine/index.ts';
 	import Sparkline from '#lib/ui/Sparkline.svelte';
@@ -129,7 +130,7 @@
 						<div class="hero-num">
 							<span class="display num">{kg(hero.weight)}</span>
 							<small class="muted">kg · {hero.exercise}</small>
-							<small class="muted">{hero.sets} × {hero.reps} Wdh.</small>
+							<small class="muted">{hero.sets} × {hero.reps} Wdh. · RPE {rpeLabel(hero.rpe)}</small>
 						</div>
 					{/if}
 				</div>

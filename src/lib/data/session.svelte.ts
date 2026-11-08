@@ -24,6 +24,9 @@ import {
 import { auth } from './firebase.ts';
 import {
 	createPlanFromRequest,
+	deletePlan,
+	updatePlan,
+	watchPlans,
 	ensureProfile,
 	finishWorkout,
 	saveProgram,
@@ -44,6 +47,8 @@ class Session {
 	user = $state<SessionUser | null>(null);
 	profile = $state<Profile | null>(null);
 	plan = $state<Plan | null>(null);
+	/** Alle Pläne des Nutzers (für die Übersicht im Profil), neueste zuerst. */
+	plans = $state<Plan[]>([]);
 	workouts = $state<Workout[]>([]);
 	/** false, bis Auth und (falls angemeldet) Profil und Plan geladen sind. */
 	ready = $state(false);
@@ -55,6 +60,8 @@ class Session {
 	#planSubs: Unsubscribe[] = [];
 	#planId: string | null = null;
 	#started = false;
+	/** Demo: Trainings je Plan im Speicher. */
+	#demoWorkouts = new Map<string, Workout[]>();
 
 	start() {
 		if (this.#started) return;
@@ -81,6 +88,9 @@ class Session {
 				watchProfile(user.uid, (profile) => {
 					this.profile = profile;
 					this.#followPlan(user.uid, profile?.activePlanId ?? null);
+				}),
+				watchPlans(user.uid, (plans) => {
+					this.plans = plans;
 				})
 			);
 		});
@@ -91,8 +101,10 @@ class Session {
 	async createPlan(req: PlanRequest): Promise<void> {
 		if (!this.user) return;
 		if (this.demo) {
-			this.plan = demoPlan(req, new Date());
+			if (this.plan) this.#demoWorkouts.set(this.plan.id, this.workouts);
+			this.plan = demoPlan(req, new Date(), `demo-${Date.now()}`);
 			this.workouts = [];
+			this.plans = [this.plan, ...this.plans];
 			if (this.profile) this.profile = { ...this.profile, bests: req.bests, activePlanId: this.plan.id };
 			return;
 		}
@@ -141,6 +153,63 @@ class Session {
 			console.warn(e);
 			this.error = 'Änderung konnte nicht gespeichert werden. Sie wird nachgeholt, sobald Verbindung besteht.';
 		});
+	}
+
+	/** Name und/oder Programm des aktiven Plans ändern (Plan anpassen). */
+	updatePlan(patch: { name?: string; change?: (program: Program) => void }) {
+		if (!this.user || !this.plan) return;
+		const program = structuredClone($state.snapshot(this.plan.program)) as Program;
+		patch.change?.(program);
+		const name = patch.name?.trim().slice(0, 60) || this.plan.name;
+		this.plan = { ...this.plan, name, program };
+		this.plans = this.plans.map((p) => (p.id === this.plan!.id ? this.plan! : p));
+		if (this.demo) return;
+		updatePlan(this.user.uid, this.plan.id, { name, program }).catch((e) => {
+			console.warn(e);
+			this.error = 'Änderung konnte nicht gespeichert werden. Sie wird nachgeholt, sobald Verbindung besteht.';
+		});
+	}
+
+	/** Einen anderen Plan aktiv schalten. */
+	setActivePlan(planId: string) {
+		if (!this.user || !this.profile || this.profile.activePlanId === planId) return;
+		if (this.demo) {
+			if (this.plan) this.#demoWorkouts.set(this.plan.id, this.workouts);
+			this.plan = this.plans.find((p) => p.id === planId) ?? null;
+			this.workouts = this.#demoWorkouts.get(planId) ?? [];
+			this.profile = { ...this.profile, activePlanId: planId };
+			return;
+		}
+		updateProfile(this.user.uid, { activePlanId: planId }).catch((e) => {
+			console.warn(e);
+			this.error = 'Plan konnte nicht aktiviert werden. Prüfe die Verbindung.';
+		});
+	}
+
+	/** Plan und seine Trainings löschen. War er aktiv, wird der neueste übrige Plan aktiv. */
+	async deletePlan(planId: string): Promise<void> {
+		if (!this.user || !this.profile) return;
+		const wasActive = this.profile.activePlanId === planId;
+		const next = wasActive ? (this.plans.find((p) => p.id !== planId)?.id ?? null) : undefined;
+		if (this.demo) {
+			this.plans = this.plans.filter((p) => p.id !== planId);
+			this.#demoWorkouts.delete(planId);
+			if (wasActive) {
+				this.plan = this.plans.find((p) => p.id === next) ?? null;
+				this.workouts = next ? (this.#demoWorkouts.get(next) ?? []) : [];
+				this.profile = { ...this.profile, activePlanId: next ?? null };
+			}
+			return;
+		}
+		await deletePlan(this.user.uid, planId, next);
+	}
+
+	/** Anstrengung im Training: leicht/okay/hart oder RPE-Zahl. */
+	setEffortScale(scale: 'simple' | 'rpe') {
+		if (!this.user || !this.profile) return;
+		this.profile = { ...this.profile, effortScale: scale };
+		if (this.demo) return;
+		updateProfile(this.user.uid, { effortScale: scale }).catch((e) => console.warn(e));
 	}
 
 	/**
@@ -232,6 +301,7 @@ class Session {
 		this.#planId = null;
 		this.profile = null;
 		this.plan = null;
+		this.plans = [];
 		this.workouts = [];
 	}
 
@@ -248,6 +318,12 @@ class Session {
 			start.setDate(start.getDate() - 14);
 			this.plan = demoPlan(DEMO_REQUEST, start);
 			this.workouts = demoHistory(this.plan, now);
+			// Ein älterer, abgeschlossener Plan für die Übersicht im Profil.
+			const older = new Date(start);
+			older.setDate(older.getDate() - 7 * 12);
+			const old = demoPlan({ ...DEMO_REQUEST, block: 'hypertrophy' }, older, 'demo-alt');
+			old.createdAt = older.toISOString();
+			this.plans = [this.plan, old];
 		}
 		this.profile = {
 			uid: 'demo',
@@ -283,11 +359,11 @@ const DEMO_REQUEST: PlanRequest = {
 	bests: { squat: 140, bench: 100, deadlift: 175, press: 62.5 }
 };
 
-function demoPlan(req: PlanRequest, start: Date): Plan {
+function demoPlan(req: PlanRequest, start: Date, id = 'demo-plan'): Plan {
 	const ts = new Date().toISOString();
 	const program = createProgram(req);
 	return {
-		id: 'demo-plan',
+		id,
 		ownerId: 'demo',
 		authorId: 'demo',
 		source: 'generator',

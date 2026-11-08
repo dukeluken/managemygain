@@ -4,7 +4,7 @@
 	import { workoutId } from '#lib/data/repo.ts';
 	import { session } from '#lib/data/session.svelte.ts';
 	import type { Feel, LoggedExercise, Workout } from '#lib/data/types.ts';
-	import { dayPrescription, dayTitle, feelToRpe, isoDate, kg } from '#lib/engine/index.ts';
+	import { dayPrescription, dayTitle, feelToRpe, isoDate, kg, rpeLabel, rpeToFeel } from '#lib/engine/index.ts';
 	import Icon from '#lib/ui/Icon.svelte';
 	import { onDestroy } from 'svelte';
 
@@ -124,11 +124,20 @@
 		session.saveWorkout($state.snapshot(workout) as Workout);
 	}
 
-	function log(feel: Feel) {
+	// Anstrengung: leicht/okay/hart oder RPE-Zahl (Einstellung im Profil, hier umschaltbar).
+	const rpeMode = $derived(session.profile?.effortScale === 'rpe');
+	const RPE_SCALE = [6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10];
+
+	function log(feel: Feel | null, rpe?: number) {
 		if (!ex || !set) return;
 		commitWeight();
-		set.feel = feel;
-		set.rpe = feelToRpe(feel, ex.target.rpe);
+		if (rpe != null) {
+			set.rpe = rpe;
+			set.feel = rpeToFeel(rpe, ex.target.rpe);
+		} else if (feel) {
+			set.feel = feel;
+			set.rpe = feelToRpe(feel, ex.target.rpe);
+		}
 		set.done = true;
 		persist();
 		const nextSet = ex.sets.findIndex((s) => !s.done);
@@ -209,7 +218,9 @@
 		{#if set}
 			<section class="tile card" aria-label="Aktueller Satz">
 				<div class="target muted">
-					Satz {setIndex + 1} von {ex.sets.length} · Ziel {ex.target.reps} Wdh.{ex.target.weight ? ` · ${kg(ex.target.weight)} kg` : ''}
+					Satz {setIndex + 1} von {ex.sets.length} · Ziel {ex.target.reps} Wdh.{ex.target.weight
+						? ` · ${kg(ex.target.weight)} kg`
+						: ''} · <b class="rpe">RPE {rpeLabel(ex.target.rpe)}</b>
 				</div>
 				<label class="weight">
 					<input
@@ -245,7 +256,9 @@
 				<button class="set" class:cur={i === setIndex} class:done={s.done} onclick={() => select(exIndex, i)}>
 					<span class="n num">{i + 1}</span>
 					<span class="num">{s.weight != null ? `${kg(s.weight)} kg` : '–'} × {s.reps ?? '–'}</span>
-					<span class="tag">{s.done ? `✓ ${s.feel}` : i === setIndex ? 'jetzt' : ''}</span>
+					<span class="tag"
+						>{s.done ? (rpeMode && s.rpe != null ? `✓ RPE ${rpeLabel(s.rpe)}` : `✓ ${s.feel}`) : i === setIndex ? 'jetzt' : ''}</span
+					>
 				</button>
 			{/each}
 			<button class="add" onclick={addSet}>+ Satz hinzufügen</button>
@@ -256,23 +269,34 @@
 				<span>{finishing ? 'Wird gespeichert …' : 'Training abschließen'}</span>
 				<small>{doneSets} Sätze</small>
 			</button>
-		{:else if set && !set.done}
+		{:else if set}
 			<div class="feel-wrap">
-				<div class="muted q">Wie schwer war Satz {setIndex + 1}?</div>
-				<div class="feel tile">
-					<button onclick={() => log('leicht')}>leicht</button>
-					<button onclick={() => log('okay')}>okay</button>
-					<button onclick={() => log('hart')}>hart</button>
+				<div class="q-row">
+					<span class="muted q">
+						{set.done
+							? `Satz ${setIndex + 1} erledigt${rpeMode && set.rpe != null ? ` (RPE ${rpeLabel(set.rpe)})` : ` (${set.feel})`}. Neu bewerten:`
+							: rpeMode
+								? `RPE von Satz ${setIndex + 1}? Ziel ${rpeLabel(ex.target.rpe)}`
+								: `Wie schwer war Satz ${setIndex + 1}?`}
+					</span>
+					<button class="switch-scale" onclick={() => session.setEffortScale(rpeMode ? 'simple' : 'rpe')}>
+						{rpeMode ? 'leicht/okay/hart' : 'RPE eingeben'}
+					</button>
 				</div>
-			</div>
-		{:else if set?.done}
-			<div class="feel-wrap">
-				<div class="muted q">Satz {setIndex + 1} erledigt ({set.feel}). Neu bewerten:</div>
-				<div class="feel tile">
-					<button onclick={() => log('leicht')}>leicht</button>
-					<button onclick={() => log('okay')}>okay</button>
-					<button onclick={() => log('hart')}>hart</button>
-				</div>
+				{#if rpeMode}
+					<div class="rpe-grid">
+						{#each RPE_SCALE as value (value)}
+							<button class:target={value === ex.target.rpe} onclick={() => log(null, value)}>{rpeLabel(value)}</button>
+						{/each}
+					</div>
+					<span class="muted hint">RPE 10 = nichts mehr übrig · 9 = noch 1 Wdh. · 8 = noch 2 · 7 = noch 3</span>
+				{:else}
+					<div class="feel tile">
+						<button onclick={() => log('leicht')}>leicht</button>
+						<button onclick={() => log('okay')}>okay</button>
+						<button onclick={() => log('hart')}>hart</button>
+					</div>
+				{/if}
 			</div>
 		{/if}
 
@@ -444,7 +468,53 @@
 	}
 	.q {
 		font-size: 13px;
+	}
+	.q-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 12px;
 		margin-bottom: 8px;
+	}
+	.switch-scale {
+		font-size: 12px;
+		color: var(--ac-ink);
+		font-weight: 600;
+		white-space: nowrap;
+	}
+	.target .rpe {
+		color: var(--tx);
+		font-weight: 600;
+	}
+	.rpe-grid {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 6px;
+	}
+	.rpe-grid button {
+		padding: 14px 0;
+		border-radius: 16px;
+		background: var(--glass);
+		box-shadow: var(--glass-edge);
+		font-family: var(--f-num);
+		font-stretch: 75%;
+		font-weight: 700;
+		font-size: 22px;
+		font-variant-numeric: tabular-nums;
+	}
+	.rpe-grid button.target {
+		box-shadow:
+			inset 0 0 0 2px var(--ac),
+			var(--glass-edge);
+	}
+	.rpe-grid button:active {
+		background: var(--ac);
+		color: var(--on-ac);
+	}
+	.hint {
+		display: block;
+		margin-top: 8px;
+		font-size: 12px;
 	}
 	.feel {
 		display: grid;
