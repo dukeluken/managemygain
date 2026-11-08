@@ -2,6 +2,7 @@
 // Coach-Freigaben, Regeln und Migration hängen später hier ein.
 import {
 	collection,
+	deleteDoc,
 	doc,
 	getDoc,
 	getDocs,
@@ -134,6 +135,10 @@ export function workoutId(planId: string, weekIndex: number, dayIndex: number) {
 
 export function saveWorkout(uid: string, workout: Workout) {
 	return setDoc(doc(workoutsCol(uid), workout.id), workout);
+}
+
+export function deleteWorkout(uid: string, workoutId: string) {
+	return deleteDoc(doc(workoutsCol(uid), workoutId));
 }
 
 /** Training abschließen und den Plan aus den geloggten Sätzen nachführen. */

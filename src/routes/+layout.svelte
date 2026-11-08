@@ -9,8 +9,8 @@
 	let { children } = $props();
 	session.start();
 
-	// Im Training und beim Plan-Erstellen keine Leiste: volle Konzentration.
-	const focused = $derived(/^\/(training|start)/.test(page.url.pathname));
+	// Im Training, beim Plan-Erstellen und beim Bearbeiten eines Trainings keine Leiste.
+	const focused = $derived(/^\/(training|start|verlauf\/.)/.test(page.url.pathname));
 </script>
 
 <Glow />

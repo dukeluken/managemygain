@@ -12,6 +12,7 @@ import type { Unsubscribe } from 'firebase/firestore';
 import {
 	applyWorkout,
 	createProgram,
+	dayPrescription,
 	dayTitle,
 	applyBests,
 	estimatesAt,
@@ -25,6 +26,7 @@ import { auth } from './firebase.ts';
 import {
 	createPlanFromRequest,
 	deletePlan,
+	deleteWorkout,
 	updatePlan,
 	watchPlans,
 	ensureProfile,
@@ -202,6 +204,43 @@ class Session {
 			return;
 		}
 		await deletePlan(this.user.uid, planId, next);
+	}
+
+	/**
+	 * Abgeschlossenes Training nachträglich ändern (Sätze, Gewichte, Bewertung, Datum).
+	 * Der Plan wird dadurch nicht rückwirkend neu berechnet; die doppelte Progression
+	 * und der Verlauf nutzen aber sofort die korrigierten Werte.
+	 */
+	updateWorkout(workout: Workout) {
+		if (!this.user) return;
+		if (this.demo) {
+			this.#upsertLocal(workout);
+			return;
+		}
+		this.#upsertLocal(workout);
+		saveWorkout(this.user.uid, workout).catch((e) => {
+			console.warn(e);
+			this.error = 'Training konnte nicht gespeichert werden. Es wird nachgeholt, sobald Verbindung besteht.';
+		});
+	}
+
+	async deleteWorkout(workoutId: string): Promise<void> {
+		if (!this.user) return;
+		this.workouts = this.workouts.filter((w) => w.id !== workoutId);
+		if (this.demo) return;
+		await deleteWorkout(this.user.uid, workoutId);
+	}
+
+	/** Satzpause in Sekunden für Grundübungen und andere Übungen. */
+	get restSeconds(): { main: number; other: number } {
+		return this.profile?.restSeconds ?? { main: 180, other: 90 };
+	}
+
+	setRestSeconds(rest: { main: number; other: number }) {
+		if (!this.user || !this.profile) return;
+		this.profile = { ...this.profile, restSeconds: rest };
+		if (this.demo) return;
+		updateProfile(this.user.uid, { restSeconds: rest }).catch((e) => console.warn(e));
 	}
 
 	/** Anstrengung im Training: leicht/okay/hart oder RPE-Zahl. */
@@ -409,7 +448,19 @@ function demoHistory(plan: Plan, now: Date): Workout[] {
 				date: isoDate(date),
 				startedAt: date.toISOString(),
 				finishedAt: date.toISOString(),
-				exercises: []
+				exercises: dayPrescription(plan.program, week, dayIndex).map((p) => ({
+					exercise: p.exercise,
+					lift: p.lift,
+					isMain: p.isMain,
+					target: { sets: p.sets, reps: p.reps, rpe: p.rpe, weight: p.weight },
+					sets: Array.from({ length: p.sets }, () => ({
+						weight: p.weight ?? 40,
+						reps: Number.parseInt(p.reps, 10) || 8,
+						feel: 'okay' as const,
+						rpe: p.rpe,
+						done: true
+					}))
+				}))
 			});
 		}
 	});

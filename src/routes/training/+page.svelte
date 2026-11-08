@@ -179,10 +179,10 @@
 		const nextSet = ex.sets.findIndex((s) => !s.done);
 		if (nextSet >= 0) {
 			setIndex = nextSet;
-			startRest(ex.isMain ? 180 : 90);
+			startRest(ex.isMain ? session.restSeconds.main : session.restSeconds.other);
 		} else {
 			// Übung fertig: kurz das Häkchen zeigen, dann zurück zur Übersicht.
-			if (workout!.exercises.some((e) => e.sets.some((s) => !s.done))) startRest(120);
+			if (workout!.exercises.some((e) => e.sets.some((s) => !s.done))) startRest(session.restSeconds.other);
 			else {
 				clearInterval(timer);
 				restLeft = 0;

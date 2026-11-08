@@ -25,6 +25,8 @@
 
 	const plan = $derived(session.plan);
 	const finished = $derived(session.workouts.filter((w) => w.finishedAt).length);
+	const restLabel = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
 	// Alle Pläne; solange die Liste lädt, wenigstens der aktive.
 	const plans = $derived(session.plans.length ? session.plans : plan ? [plan] : []);
 	let confirmDelete = $state<string | null>(null);
@@ -137,6 +139,29 @@
 			<a class="row link" href="/start">+ Neuen Plan erstellen</a>
 		</div>
 		<p class="muted note">Ein neuer Plan wird aktiv, die anderen bleiben gespeichert.</p>
+	</section>
+
+	<section>
+		<div class="eyebrow head"><span>Training</span></div>
+		<div class="tile rows">
+			<a class="row link" href="/verlauf">Trainingsverlauf <span class="muted num">{finished} Trainings</span></a>
+			{#each [['main', 'Satzpause Grundübungen', 'Kniebeuge, Bankdrücken, Kreuzheben, Schulterdrücken'], ['other', 'Satzpause andere Übungen', 'Auch zwischen zwei Übungen']] as const as [key, label, hint] (key)}
+				<div class="row rest">
+					<span class="bname">{label}<small class="muted">{hint}</small></span>
+					<span class="stepper">
+						<button
+							onclick={() => session.setRestSeconds({ ...session.restSeconds, [key]: Math.max(30, session.restSeconds[key] - 15) })}
+							aria-label="{label} 15 Sekunden kürzer"><Icon name="minus" size={16} /></button
+						>
+						<b class="num">{restLabel(session.restSeconds[key])}</b>
+						<button
+							onclick={() => session.setRestSeconds({ ...session.restSeconds, [key]: Math.min(600, session.restSeconds[key] + 15) })}
+							aria-label="{label} 15 Sekunden länger"><Icon name="plus" size={16} /></button
+						>
+					</span>
+				</div>
+			{/each}
+		</div>
 	</section>
 
 	<section>
@@ -287,6 +312,25 @@
 	}
 	a.link {
 		text-decoration: none;
+	}
+	.rest .stepper {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex: none;
+	}
+	.rest .stepper button {
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		display: grid;
+		place-items: center;
+		background: var(--sf2);
+	}
+	.rest .stepper b {
+		min-width: 3.4ch;
+		text-align: center;
+		font-size: 16px;
 	}
 	.sheet-fields {
 		padding: 0 16px;

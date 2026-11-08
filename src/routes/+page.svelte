@@ -195,14 +195,14 @@
 
 	{#if last}
 		<section aria-label="Zuletzt">
-			<div class="eyebrow head"><span>Zuletzt</span></div>
-			<div class="tile lastw">
+			<div class="eyebrow head"><span>Zuletzt</span><a class="all" href="/verlauf">Alle Trainings</a></div>
+			<a class="tile lastw" href="/verlauf/{encodeURIComponent(last.id)}">
 				<div>
 					<b>{last.dayName}</b>
 					<small class="muted">{shortDate(last.date)} · Woche {last.weekIndex + 1}</small>
 				</div>
 				<span class="muted num">{lastSets ? `${lastSets} Sätze` : 'erledigt'}</span>
-			</div>
+			</a>
 		</section>
 	{/if}
 </main>
@@ -386,7 +386,14 @@
 		font-size: 32px;
 		text-align: right;
 	}
+	.all {
+		color: var(--ac-ink);
+		font-weight: 600;
+		text-decoration: none;
+	}
 	.lastw {
+		text-decoration: none;
+		color: inherit;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;

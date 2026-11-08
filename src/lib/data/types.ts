@@ -25,6 +25,8 @@ export interface Profile {
 	/** Eigene Bestwerte (1 Wiederholung, kg). Grundlage für alle Gewichte im Plan. */
 	bests?: Bests;
 	bestsUpdatedAt?: string;
+	/** Satzpause in Sekunden: Grundübungen (main) und alle anderen Übungen (other). */
+	restSeconds?: { main: number; other: number };
 	createdAt: string;
 	updatedAt: string;
 }
