@@ -98,7 +98,7 @@
 		<p class="muted lead">
 			Beantworte ein paar kurze Fragen zu Ziel, Zeit und Erfahrung. Daraus entsteht dein Plan mit Gewichten für jede Woche.
 		</p>
-		<a class="cta" href="/start"><span>Plan erstellen</span><small>ca. 1 min</small></a>
+		<a class="cta" href="/start" data-tour="create"><span>Plan erstellen</span><small>ca. 1 min</small></a>
 	{:else if weekIndex < 0}
 		<p class="muted lead">Dein Plan startet am Montag, {parseIsoDate(plan.startDate).toLocaleDateString('de-DE')}.</p>
 	{:else if !inPlan}
@@ -114,7 +114,7 @@
 	{:else}
 		<!-- Nächstes Training -->
 		{#if day}
-			<section class="tile card next" aria-label="Nächstes Training">
+			<section class="tile card next" aria-label="Nächstes Training" data-tour="next">
 				<div class="label">
 					<b>{isToday ? 'Heute' : 'Als Nächstes'}</b>
 					<span class="muted">{isToday ? '' : `geplant für ${WEEKDAY_LONG[day.weekDay]}`}</span>
@@ -147,7 +147,7 @@
 		{/if}
 
 		<!-- Woche und Block -->
-		<div class="pair">
+		<div class="pair" data-tour="week">
 			<section class="tile small" aria-label="Diese Woche">
 				<div class="label"><span class="muted">Diese Woche</span></div>
 				<div class="figure"><span class="display num">{doneCount}</span><small class="muted">von {sessionCount}</small></div>
@@ -173,7 +173,7 @@
 	{/if}
 
 	{#if plan && progress.length}
-		<section aria-label="Fortschritt">
+		<section aria-label="Fortschritt" data-tour="progress">
 			<div class="eyebrow head"><span>Fortschritt · geschätzte Bestwerte</span><span>{totalDone} Trainings</span></div>
 			<div class="tile progress">
 				{#each progress as p (p.lift)}

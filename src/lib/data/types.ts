@@ -27,6 +27,8 @@ export interface Profile {
 	bestsUpdatedAt?: string;
 	/** Satzpause in Sekunden: Grundübungen (main) und alle anderen Übungen (other). */
 	restSeconds?: { main: number; other: number };
+	/** Tutorial abgeschlossen oder beendet. Fehlt/false: Tour startet beim nächsten Öffnen. */
+	tutorialDone?: boolean;
 	createdAt: string;
 	updatedAt: string;
 }

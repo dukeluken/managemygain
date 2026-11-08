@@ -73,7 +73,7 @@
 			</p>
 		</div>
 
-		<div class="weeks" role="tablist" aria-label="Wochen">
+		<div class="weeks" role="tablist" aria-label="Wochen" data-tour="weeks">
 			{#each Array.from({ length: weeks }, (_, i) => i) as i (i)}
 				<button
 					role="tab"
@@ -90,7 +90,7 @@
 			{/each}
 		</div>
 
-		<section class="tile days" aria-label="Tage der Woche {week + 1}">
+		<section class="tile days" aria-label="Tage der Woche {week + 1}" data-tour="days">
 			{#each slots as s (s.weekDay)}
 				{#if s.dayIndex == null}
 					<div class="day rest">
@@ -130,7 +130,7 @@
 			{/each}
 		</section>
 		<p class="muted hint">{blockDescription(plan)}. Tippe auf einen Tag und dann auf eine Übung, um sie zu ändern.</p>
-		<button class="ghost adjust" onclick={() => (settings = true)}><Icon name="edit" size={18} />Plan anpassen</button>
+		<button class="ghost adjust" onclick={() => (settings = true)} data-tour="adjust"><Icon name="edit" size={18} />Plan anpassen</button>
 	{/if}
 </main>
 

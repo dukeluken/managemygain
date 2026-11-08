@@ -15,6 +15,7 @@
 	import BestField from '#lib/ui/BestField.svelte';
 	import Icon from '#lib/ui/Icon.svelte';
 	import Sheet from '#lib/ui/Sheet.svelte';
+	import { tour } from '#lib/ui/tour.svelte.ts';
 	import { applyTheme, getThemePref } from '#lib/ui/theme.ts';
 
 	let theme = $state<ThemePref>(getThemePref());
@@ -70,7 +71,7 @@
 	<div class="eyebrow"><span>Profil</span></div>
 	<h1 class="title">{session.profile?.displayName ?? session.user?.displayName ?? 'Athlet'}</h1>
 
-	<section>
+	<section data-tour="bests">
 		<div class="eyebrow head"><span>Bestwerte · 1 Wiederholung</span><button class="edit" onclick={openEditor}>Ändern</button></div>
 		<div class="tile rows">
 			{#each lifts as l (l)}
@@ -141,7 +142,7 @@
 		<p class="muted note">Ein neuer Plan wird aktiv, die anderen bleiben gespeichert.</p>
 	</section>
 
-	<section>
+	<section data-tour="settings">
 		<div class="eyebrow head"><span>Training</span></div>
 		<div class="tile rows">
 			<a class="row link" href="/verlauf">Trainingsverlauf <span class="muted num">{finished} Trainings</span></a>
@@ -190,6 +191,13 @@
 					{label}
 				</button>
 			{/each}
+		</div>
+	</section>
+
+	<section>
+		<div class="eyebrow head"><span>Hilfe</span></div>
+		<div class="tile rows">
+			<button class="row link" onclick={() => tour.start()}>Tutorial starten</button>
 		</div>
 	</section>
 

@@ -304,7 +304,7 @@
 
 		{@render restBar()}
 
-		<section class="exlist" aria-label="Übungen">
+		<section class="exlist" aria-label="Übungen" data-tour="exlist">
 			{#each workout.exercises as e, i (i)}
 				{@const st = status(e)}
 				<button class="excard tile {st}" onclick={() => openExercise(i)}>
@@ -324,7 +324,7 @@
 			{/each}
 		</section>
 
-		<button class="cta finish" onclick={() => (finishOpen = true)}>
+		<button class="cta finish" onclick={() => (finishOpen = true)} data-tour="finish">
 			<span>Training beenden</span><small>{doneSets} von {totalSets} Sätzen</small>
 		</button>
 	</main>

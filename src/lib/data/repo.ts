@@ -36,6 +36,7 @@ export async function ensureProfile(uid: string, displayName: string): Promise<v
 		activePlanId: null,
 		coachId: null,
 		effortScale: 'simple',
+		tutorialDone: false,
 		createdAt: now(),
 		updatedAt: now()
 	};

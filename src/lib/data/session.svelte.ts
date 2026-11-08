@@ -243,6 +243,13 @@ class Session {
 		updateProfile(this.user.uid, { restSeconds: rest }).catch((e) => console.warn(e));
 	}
 
+	setTutorialDone(done: boolean) {
+		if (!this.user || !this.profile) return;
+		this.profile = { ...this.profile, tutorialDone: done };
+		if (this.demo) return;
+		updateProfile(this.user.uid, { tutorialDone: done }).catch((e) => console.warn(e));
+	}
+
 	/** Anstrengung im Training: leicht/okay/hart oder RPE-Zahl. */
 	setEffortScale(scale: 'simple' | 'rpe') {
 		if (!this.user || !this.profile) return;
@@ -371,6 +378,8 @@ class Session {
 			activePlanId: this.plan?.id ?? null,
 			coachId: null,
 			effortScale: 'simple',
+			// Demo: Tour nur mit ?tour (zum Testen)
+			tutorialDone: !params.has('tour'),
 			bests: mode === 'leer' ? undefined : DEMO_REQUEST.bests,
 			createdAt: now.toISOString(),
 			updatedAt: now.toISOString()
